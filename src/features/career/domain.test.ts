@@ -1,0 +1,3 @@
+import {describe,it,expect} from 'vitest';
+import {careerFunnel} from './domain';
+describe('career funnel',()=>{it('preserves interview conversion after rejection through history',()=>{const result=careerFunnel([{id:'a',status:'REJECTED',appliedAt:new Date()}],[{entityId:'a',metadata:{to:'TECHNICAL_INTERVIEW'}}]);expect(result).toMatchObject({applied:1,responses:1,interviews:1,offers:0,interviewRate:100});});it('handles no applications and saved jobs without fake conversion',()=>{expect(careerFunnel([]).responseRate).toBe(0);expect(careerFunnel([{id:'a',status:'SAVED',appliedAt:null}]).applied).toBe(0);});});

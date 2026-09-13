@@ -1,5 +1,5 @@
 {
-  "name": "nutriopus",
+  "name": "tbb",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -13,9 +13,9 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "prisma:seed": "npx tsx prisma/seed.ts",
     "prisma:studio": "prisma studio",
-    "signaling": "tsx scripts/signaling-server.ts"
+    "typecheck": "tsc --noEmit",
+    "setup:local": "node scripts/setup-local.mjs"
   },
   "dependencies": {
     "@ai-sdk/groq": "^3.0.40",
@@ -82,8 +82,5 @@
     "tsx": "^4.22.4",
     "typescript": "^5",
     "vitest": "^4.1.8"
-  },
-  "prisma": {
-    "seed": "npx tsx prisma/seed.ts"
   }
 }

@@ -1,36 +1,3 @@
 import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  experimental: {
-    // Client-side Router Cache.
-    // Default is 0 for dynamic routes — without this every navigation re-fetches.
-    // 5 minutes is safe because mutations call revalidatePath/revalidateTag.
-    staleTimes: {
-      dynamic: 300,
-      static: 1800,
-    },
-  },
-  async rewrites() {
-    return {
-      beforeFiles: [
-        {
-          source: "/uploads/:path*",
-          destination: "/api/local-uploads/:path*",
-        },
-      ],
-      afterFiles: [
-        {
-          source: "/portal/:tenant/paciente/:patient",
-          destination: "/portal/:tenant",
-        },
-        {
-          source: "/portal/:tenant/paciente/:patient/:path*",
-          destination: "/portal/:tenant/:path*",
-        },
-      ],
-      fallback: [],
-    };
-  },
-};
-
+const nextConfig: NextConfig = { poweredByHeader:false, experimental:{serverActions:{bodySizeLimit:"3mb"}}, async headers(){return [{source:"/:path*",headers:[{key:"X-Content-Type-Options",value:"nosniff"},{key:"Referrer-Policy",value:"strict-origin-when-cross-origin"},{key:"X-Frame-Options",value:"DENY"}]}];} };
 export default nextConfig;

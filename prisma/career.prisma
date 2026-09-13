@@ -1,0 +1,113 @@
+enum ApplicationStatus {
+  SAVED
+  APPLIED
+  RECRUITER_CONTACT
+  HR_INTERVIEW
+  TECHNICAL_INTERVIEW
+  FINAL_INTERVIEW
+  OFFER
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+enum WorkMode {
+  REMOTE
+  HYBRID
+  ONSITE
+}
+model Company {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  name String
+  website String?
+  industry String?
+  notes String?
+  applications Application[]
+  contacts Contact[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([id,workspaceId])
+  @@index([workspaceId,name])
+}
+model Application {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  companyId String
+  company Company @relation(fields:[companyId,workspaceId], references:[id,workspaceId])
+  jobTitle String
+  url String?
+  source String @default("Other")
+  salaryMinCents Int?
+  salaryMaxCents Int?
+  currency String @default("BRL")
+  location String?
+  workMode WorkMode @default(REMOTE)
+  technologies String[] @default([])
+  appliedAt DateTime?
+  status ApplicationStatus @default(SAVED)
+  statusChangedAt DateTime @default(now())
+  notes String?
+  nextActionDate String?
+  interviews Interview[]
+  offers Offer[]
+  documents CareerDocument[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([id,workspaceId])
+  @@index([workspaceId,status])
+  @@index([workspaceId,nextActionDate])
+}
+model Contact {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  companyId String?
+  company Company? @relation(fields:[companyId,workspaceId], references:[id,workspaceId])
+  name String
+  email String?
+  role String?
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([workspaceId,name])
+}
+model Interview {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  applicationId String
+  application Application @relation(fields:[applicationId,workspaceId], references:[id,workspaceId])
+  title String
+  scheduledAt DateTime
+  durationMinutes Int @default(60)
+  location String?
+  notes String?
+  createdAt DateTime @default(now())
+  @@index([workspaceId,scheduledAt])
+}
+model Offer {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  applicationId String
+  application Application @relation(fields:[applicationId,workspaceId], references:[id,workspaceId])
+  salaryCents Int
+  currency String @default("BRL")
+  notes String?
+  createdAt DateTime @default(now())
+  @@index([workspaceId])
+}
+model CareerDocument {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Cascade)
+  applicationId String?
+  application Application? @relation(fields:[applicationId,workspaceId], references:[id,workspaceId])
+  name String
+  url String
+  type String @default("CV")
+  createdAt DateTime @default(now())
+  @@index([workspaceId])
+}

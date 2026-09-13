@@ -1,0 +1,28 @@
+.heatmapScroll { overflow-x: auto; max-width: 100%; padding: 3px 0 5px; scrollbar-width: thin; }
+.heatmapInner { min-width: 700px; }
+.heatmap { display: grid; grid-template-rows: repeat(7, 10px); grid-auto-flow: column; grid-auto-columns: minmax(10px, 1fr); gap: 3px; }
+.heatmap > span { min-width: 0; }
+.cell, .blank { display: block; width: 100%; height: 10px; min-width: 10px; border-radius: 2px; background: var(--muted); }
+.cell { transition: outline-color 100ms, transform 100ms; }
+.cell:hover, .cell:focus-visible { outline: 2px solid var(--foreground); outline-offset: 1px; transform: scale(1.1); }
+.cell[data-future="true"] { opacity: .35; }
+.blank { background: transparent; }
+.monthLabels { display: grid; grid-template-columns: repeat(54, minmax(10px, 1fr)); gap: 3px; margin-bottom: 6px; color: var(--muted-foreground); font-size: 10px; }
+.monthLabels span { white-space: nowrap; }
+.legend { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 10px; margin-top: 8px; }
+.tooltip { display: flex; flex-direction: column; gap: 3px; }
+.habitCard { min-width: 0; padding: 20px; }
+.habitHeader { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 18px; }
+.habitName { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.habitName h2 { font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
+.habitIcon { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 9px; background: color-mix(in srgb, var(--habit-color) 12%, transparent); color: var(--habit-color); }
+.habitMeta { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted-foreground); margin-top: 5px; }
+.progressTrack { height: 4px; background: var(--muted); border-radius: 5px; overflow: hidden; margin-top: 10px; }
+.dayGrid { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 6px; }
+.day { min-width: 0; padding: 10px 5px; border: 1px solid var(--border); border-radius: 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; }
+.day[data-complete="true"] { border-color: var(--habit-color); background: color-mix(in srgb,var(--habit-color) 12%,transparent); }
+.day[data-future="true"] { opacity: .4; }
+.day span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editDetails summary { cursor: pointer; font-weight: 600; padding: 2px 0; }
+.editDetails[open] summary { margin-bottom: 20px; }
+@media(max-width: 640px) { .habitCard { padding: 14px; } .habitHeader { gap: 12px; } .dayGrid { gap: 3px; } .day { font-size: 10px; padding: 8px 2px; } }

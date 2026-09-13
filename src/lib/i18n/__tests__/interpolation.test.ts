@@ -7,7 +7,7 @@ describe("i18n interpolation", () => {
   });
 
   it("replaces single-brace placeholders used by some UI strings", () => {
-    expect(interpolateMessage("Paciente {name}", { name: "Ana" })).toBe("Paciente Ana");
+    expect(interpolateMessage("Workspace {name}", { name: "Ana" })).toBe("Workspace Ana");
   });
 
   it("ignores defaultValue as a placeholder param", () => {

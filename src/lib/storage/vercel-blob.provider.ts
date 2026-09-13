@@ -1,30 +1,17 @@
-import { StorageProvider, UploadOptions } from "./storage-provider";
-import { put, del } from "@vercel/blob";
-
+import { put, get, del } from "@vercel/blob";
+import { randomUUID } from "node:crypto";
+import type { StorageProvider, UploadOptions } from "./storage-provider";
 export class VercelBlobProvider implements StorageProvider {
-  async uploadFile(buffer: Buffer, options: UploadOptions): Promise<string> {
+  async uploadFile(buffer: Buffer, options: UploadOptions) {
     const folder = options.folder || "general";
-    const safeName = options.fileName.replace(/[^a-zA-Z0-9.-]/g, "_");
-    const path = `${folder}/${safeName}`;
-
-    const blob = await put(path, buffer, {
-      access: "public",
-      addRandomSuffix: true,
-    });
-
+    if (!/^[a-zA-Z0-9_-]+$/.test(folder)) throw new Error("Diretório inválido.");
+    const blob = await put(`tbb/${folder}/${randomUUID()}`, buffer, { access: "private", addRandomSuffix: false, contentType: options.contentType });
     return blob.url;
   }
-
-  async deleteFile(fileUrl: string): Promise<void> {
-    if (!fileUrl) return;
-    try {
-      await del(fileUrl);
-    } catch (err) {
-      console.error(`Failed to delete blob: ${fileUrl}`, err);
-    }
+  async readFile(key: string) {
+    const result = await get(key, { access: "private" });
+    if (!result || result.statusCode !== 200) throw new Error("Arquivo não encontrado.");
+    return new Uint8Array(await new Response(result.stream).arrayBuffer());
   }
-
-  getPublicUrl(path: string): string {
-    return path; // Vercel Blob returns the full public URL
-  }
+  async deleteFile(key: string) { await del(key); }
 }

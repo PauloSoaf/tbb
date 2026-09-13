@@ -1,0 +1,225 @@
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum SessionStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+enum PermissionEffect {
+  ALLOW
+  DENY
+}
+
+enum BillingStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+model User {
+  id String @id @default(cuid())
+  name String
+  email String @unique
+  passwordHash String
+  isGlobalAdmin Boolean @default(false)
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  memberships Membership[]
+  sessions UserSession[]
+  notifications Notification[]
+  activityEvents ActivityEvent[]
+}
+
+model Workspace {
+  id String @id @default(cuid())
+  name String
+  slug String @unique
+  timezone String @default("America/Manaus")
+  locale String @default("pt-BR")
+  currency String @default("BRL")
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  memberships Membership[]
+  sessions UserSession[]
+  activityEvents ActivityEvent[]
+  notifications Notification[]
+  subscription WorkspaceSubscription?
+  featureOverrides WorkspaceFeatureOverride[]
+  usageCounters UsageCounter[]
+  storageFiles StorageFile[]
+  rolePermissions RolePermission[]
+}
+
+model Membership {
+  id String @id @default(cuid())
+  workspaceId String
+  userId String
+  role MembershipRole @default(MEMBER)
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permissionOverrides MemberPermissionOverride[]
+  @@unique([workspaceId, userId])
+  @@index([userId, isActive])
+}
+
+model UserSession {
+  id String @id @default(cuid())
+  userId String
+  workspaceId String
+  sessionTokenHash String @unique
+  status SessionStatus @default(ACTIVE)
+  userAgent String?
+  expiresAt DateTime
+  lastSeenAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([userId, status])
+  @@index([workspaceId, status])
+}
+
+model ActivityEvent {
+  id String @id @default(cuid())
+  workspaceId String
+  type String
+  entityType String
+  entityId String
+  actorUserId String?
+  metadata Json @default("{}")
+  source String @default("MANUAL")
+  createdAt DateTime @default(now())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, entityType, entityId])
+}
+
+model Notification {
+  id String @id @default(cuid())
+  workspaceId String
+  userId String?
+  title String
+  body String
+  href String?
+  readAt DateTime?
+  createdAt DateTime @default(now())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, userId, readAt])
+}
+
+model Permission {
+  id String @id @default(cuid())
+  key String @unique
+  description String
+  rolePermissions RolePermission[]
+  overrides MemberPermissionOverride[]
+}
+
+model RolePermission {
+  id String @id @default(cuid())
+  workspaceId String
+  role MembershipRole
+  permissionId String
+  enabled Boolean @default(true)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  @@unique([workspaceId, role, permissionId])
+}
+
+model MemberPermissionOverride {
+  id String @id @default(cuid())
+  membershipId String
+  permissionId String
+  effect PermissionEffect
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  @@unique([membershipId, permissionId])
+}
+
+model SubscriptionPlan {
+  id String @id @default(cuid())
+  code String @unique
+  name String
+  description String?
+  priceCents Int?
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  featureLimits FeatureLimit[]
+  subscriptions WorkspaceSubscription[]
+}
+
+model FeatureLimit {
+  id String @id @default(cuid())
+  planId String
+  key String
+  enabled Boolean @default(true)
+  limit Int?
+  plan SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  @@unique([planId, key])
+}
+
+model WorkspaceSubscription {
+  id String @id @default(cuid())
+  workspaceId String @unique
+  planId String
+  status BillingStatus @default(TRIAL)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan SubscriptionPlan @relation(fields: [planId], references: [id])
+}
+
+model WorkspaceFeatureOverride {
+  id String @id @default(cuid())
+  workspaceId String
+  key String
+  enabled Boolean @default(true)
+  limit Int?
+  expiresAt DateTime?
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@unique([workspaceId, key])
+}
+
+model UsageCounter {
+  id String @id @default(cuid())
+  workspaceId String
+  key String
+  periodStart DateTime
+  count Int @default(0)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@unique([workspaceId, key, periodStart])
+}
+
+model StorageFile {
+  id String @id @default(cuid())
+  workspaceId String
+  storageKey String @unique
+  originalName String
+  mimeType String
+  sizeBytes Int
+  purpose String
+  uploadedByUserId String
+  createdAt DateTime @default(now())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, purpose])
+}
+
+model AuthAttempt {
+  key String @id
+  attempts Int @default(1)
+  windowStart DateTime @default(now())
+}

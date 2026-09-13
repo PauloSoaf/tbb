@@ -1,0 +1,236 @@
+// Finance fragment; merged into the baseline by the root agent.
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CASH
+  CREDIT_CARD
+  INVESTMENT
+  DIGITAL_WALLET
+  OTHER
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+  REFUND
+  ADJUSTMENT
+}
+
+model Account {
+  id String @id @default(cuid())
+  workspaceId String
+  name String
+  type AccountType @default(CHECKING)
+  institution String?
+  currency String @default("BRL")
+  initialBalanceCents Int @default(0)
+  creditLimitCents Int?
+  closingDay Int?
+  dueDay Int?
+  isArchived Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  transactions FinanceTransaction[] @relation("OriginAccount")
+  incomingTransactions FinanceTransaction[] @relation("DestinationAccount")
+  subscriptions Subscription[]
+  savingsGoals SavingsGoal[]
+  importBatches ImportBatch[]
+  @@index([workspaceId, isArchived])
+}
+
+model FinanceCategory {
+  id String @id @default(cuid())
+  workspaceId String
+  name String
+  type String @default("EXPENSE")
+  icon String @default("tag")
+  color String @default("#8b8ef5")
+  parentId String?
+  isSystem Boolean @default(false)
+  isArchived Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent FinanceCategory? @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children FinanceCategory[] @relation("CategoryTree")
+  transactions FinanceTransaction[]
+  budgets Budget[]
+  subscriptions Subscription[]
+  rules TransactionRule[]
+  @@unique([workspaceId, name])
+}
+
+model FinanceTransaction {
+  id String @id @default(cuid())
+  workspaceId String
+  accountId String
+  destinationAccountId String?
+  categoryId String?
+  type TransactionType
+  description String
+  merchant String?
+  amountCents Int
+  currency String @default("BRL")
+  date DateTime @db.Date
+  competenceDate DateTime? @db.Date
+  installmentNumber Int?
+  installmentTotal Int?
+  recurring Boolean @default(false)
+  recurringGroupId String?
+  tags String[] @default([])
+  notes String?
+  source String @default("MANUAL")
+  externalId String?
+  fingerprint String?
+  importBatchId String?
+  revision Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account Account @relation("OriginAccount", fields: [accountId], references: [id])
+  destinationAccount Account? @relation("DestinationAccount", fields: [destinationAccountId], references: [id])
+  category FinanceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  importBatch ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  @@unique([workspaceId, fingerprint])
+  @@index([workspaceId, date])
+  @@index([workspaceId, accountId, date])
+  @@index([workspaceId, importBatchId])
+}
+
+model Budget {
+  id String @id @default(cuid())
+  workspaceId String
+  categoryId String
+  period String @default("MONTHLY")
+  startDate DateTime @db.Date
+  endDate DateTime @db.Date
+  limitCents Int
+  currency String @default("BRL")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category FinanceCategory @relation(fields: [categoryId], references: [id])
+  @@unique([workspaceId, categoryId, startDate, endDate])
+}
+
+model Subscription {
+  id String @id @default(cuid())
+  workspaceId String
+  name String
+  merchant String?
+  amountCents Int
+  currency String @default("BRL")
+  billingCycle String @default("MONTHLY")
+  customDays Int?
+  nextChargeDate DateTime @db.Date
+  accountId String?
+  categoryId String?
+  startedAt DateTime @db.Date
+  status String @default("ACTIVE")
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  category FinanceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  @@index([workspaceId, status, nextChargeDate])
+}
+
+model Debt {
+  id String @id @default(cuid())
+  workspaceId String
+  name String
+  originalAmountCents Int
+  remainingBalanceCents Int
+  currency String @default("BRL")
+  interestBasisPoints Int @default(0)
+  ratePeriod String @default("MONTHLY")
+  minimumPaymentCents Int
+  installments Int?
+  dueDay Int?
+  startDate DateTime @db.Date
+  targetPayoffDate DateTime? @db.Date
+  status String @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, status])
+}
+
+model SavingsGoal {
+  id String @id @default(cuid())
+  workspaceId String
+  name String
+  targetAmountCents Int
+  currentAmountCents Int @default(0)
+  currency String @default("BRL")
+  targetDate DateTime? @db.Date
+  linkedAccountId String?
+  status String @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  linkedAccount Account? @relation(fields: [linkedAccountId], references: [id], onDelete: SetNull)
+  @@index([workspaceId, status])
+}
+
+model ImportBatch {
+  id String @id @default(cuid())
+  workspaceId String
+  accountId String
+  status String @default("UPLOADED")
+  source String @default("CSV")
+  fileName String
+  fileSize Int
+  rawContent String?
+  mapping Json?
+  preview Json?
+  rowCount Int @default(0)
+  importedCount Int @default(0)
+  duplicateCount Int @default(0)
+  failedCount Int @default(0)
+  rolledBackCount Int @default(0)
+  preservedCount Int @default(0)
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+  rolledBackAt DateTime?
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id])
+  transactions FinanceTransaction[]
+  @@index([workspaceId, createdAt])
+}
+
+model ImportMapping {
+  id String @id @default(cuid())
+  workspaceId String
+  name String
+  source String @default("CSV")
+  mapping Json
+  createdAt DateTime @default(now())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@unique([workspaceId, name])
+}
+
+model TransactionRule {
+  id String @id @default(cuid())
+  workspaceId String
+  name String
+  field String @default("description")
+  operator String @default("contains")
+  value String
+  minAmountCents Int?
+  maxAmountCents Int?
+  accountId String?
+  source String?
+  categoryId String?
+  setMerchant String?
+  addTag String?
+  priority Int @default(100)
+  isEnabled Boolean @default(true)
+  createdAt DateTime @default(now())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category FinanceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  @@index([workspaceId, isEnabled, priority])
+}

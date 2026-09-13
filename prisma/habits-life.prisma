@@ -1,0 +1,157 @@
+enum HabitType {
+  BOOLEAN
+  QUANTITY
+  DURATION
+  PAGES
+  DISTANCE
+  MONEY
+  CUSTOM
+}
+
+enum HabitFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+model Habit {
+  id          String         @id @default(cuid())
+  workspaceId String
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  icon        String         @default("◉")
+  color       String         @default("#10b981")
+  type        HabitType      @default(BOOLEAN)
+  target      Float          @default(1)
+  unit        String         @default("vezes")
+  frequency   HabitFrequency @default(DAILY)
+  startDate   String
+  endDate     String?
+  isArchived  Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  schedule    HabitSchedule?
+  entries     HabitEntry[]
+
+  @@index([workspaceId, isArchived])
+}
+
+model HabitSchedule {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  habitId     String    @unique
+  habit       Habit     @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  days        Int[]     @default([0, 1, 2, 3, 4, 5, 6])
+  time        String?
+  monthlyDay  Int?
+
+  @@index([workspaceId])
+}
+
+model HabitEntry {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  habitId     String
+  habit       Habit     @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  date        String
+  value       Float     @default(0)
+  completed   Boolean   @default(false)
+  note        String?
+  source      String    @default("MANUAL")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([habitId, date])
+  @@index([workspaceId, date])
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELED
+}
+
+enum ProjectStatus {
+  ACTIVE
+  PAUSED
+  DONE
+  ARCHIVED
+}
+
+enum GoalStatus {
+  ACTIVE
+  PAUSED
+  ACHIEVED
+  ARCHIVED
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  workspaceId String
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  color       String        @default("#6366f1")
+  icon        String        @default("◈")
+  status      ProjectStatus @default(ACTIVE)
+  startDate   String?
+  targetDate  String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  tasks       Task[]
+
+  @@index([workspaceId, status])
+}
+
+model Task {
+  id                String       @id @default(cuid())
+  workspaceId       String
+  workspace         Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  projectId         String?
+  project           Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  title             String
+  description       String?
+  priority          TaskPriority @default(MEDIUM)
+  status            TaskStatus   @default(TODO)
+  dueDate           String?
+  scheduledAt       DateTime?
+  estimatedDuration Int?
+  tags              String[]     @default([])
+  completedAt       DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([workspaceId, status, dueDate])
+  @@index([projectId])
+}
+
+model Goal {
+  id             String     @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  type           String     @default("NUMERIC")
+  target         Float
+  current        Float      @default(0)
+  unit           String     @default("unidades")
+  targetDate     String?
+  status         GoalStatus @default(ACTIVE)
+  linkedModule   String?
+  linkedEntityId String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([workspaceId, status])
+}

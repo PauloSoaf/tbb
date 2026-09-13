@@ -1,18 +1,20 @@
-version: '3.8'
-
+name: tbb
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: nutriopus-db
     restart: unless-stopped
     ports:
-      - '5433:5432'
+      - '127.0.0.1:5440:5432'
     environment:
-      POSTGRES_USER: nutriopus
-      POSTGRES_PASSWORD: nutriopus
-      POSTGRES_DB: nutriopus
+      POSTGRES_USER: tbb
+      POSTGRES_PASSWORD: ${TBB_DB_PASSWORD:?Set TBB_DB_PASSWORD in .env}
+      POSTGRES_DB: tbb
     volumes:
-      - nutriopus_pgdata:/var/lib/postgresql/data
-
+      - tbb_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tbb -d tbb"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
 volumes:
-  nutriopus_pgdata:
+  tbb_pgdata:
