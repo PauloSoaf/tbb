@@ -1,0 +1,8 @@
+import { PageHeader } from "@/components/ui/PageHeader";
+import { ActionForm } from "@/components/ui/ActionForm";
+import { ImportWizard } from "@/features/finance/ImportWizard";
+import { rollbackImport } from "@/features/finance/actions";
+import { prisma } from "@/lib/prisma";
+import { getWorkspaceContext } from "@/lib/workspace";
+
+export default async function ImportsPage(){const c=await getWorkspaceContext();const [accounts,batches]=await Promise.all([prisma.account.findMany({where:{workspaceId:c.workspaceId,isArchived:false},select:{id:true,name:true},orderBy:{name:"asc"}}),prisma.importBatch.findMany({where:{workspaceId:c.workspaceId},orderBy:{createdAt:"desc"},take:20})]);return <div className="stack"><PageHeader eyebrow="MONEY · IMPORT" title="Importe com revisão." description="Detecte, mapeie, valide e confirme. Nenhum arquivo cria transações diretamente."/><ImportWizard accounts={accounts}/><section className="panel stack"><h2>Histórico de lotes</h2>{batches.map(batch=><div className="list-item" key={batch.id}><div><h3>{batch.fileName}</h3><small>{batch.source} · {batch.rowCount} linhas · {batch.status} · {batch.createdAt.toLocaleString(c.workspace.locale,{timeZone:c.workspace.timezone})}</small></div><div className="row"><span className="badge">{batch.importedCount} importadas</span>{batch.status==="COMPLETED"&&<ActionForm action={rollbackImport} className="row"><input type="hidden" name="batchId" value={batch.id}/><input name="confirmation" placeholder="DESFAZER" aria-label="Digite DESFAZER" required/><button className="button-secondary">Rollback</button></ActionForm>}</div></div>)}{!batches.length&&<p className="empty-state muted">Nenhuma importação ainda.</p>}</section></div>}

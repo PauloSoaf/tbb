@@ -97,7 +97,7 @@ export function applyRules(transaction: NormalizedTransaction, rules: ImportRule
   return { data, appliedRules };
 }
 
-export function previewCsv(content: string, mapping: ColumnMapping, workspaceId: string, accountId: string, existing: Set<string>, rules: ImportRule[] = []): ImportPreviewRow[] {
+export function previewCsv(content: string, mapping: ColumnMapping, workspaceId: string, accountId: string, existing: Set<string>, rules: ImportRule[] = [], source = "CSV"): ImportPreviewRow[] {
   const { headers, rows } = CsvFinanceImportParser.parse(content);
   for (const column of [mapping.date, mapping.description, mapping.amount]) if (!headers.includes(column)) throw new Error("Mapeie data, descrição e valor para colunas existentes.");
   if (new Set([mapping.date, mapping.description, mapping.amount]).size !== 3) throw new Error("Data, descrição e valor devem usar colunas diferentes.");
@@ -119,7 +119,7 @@ export function previewCsv(content: string, mapping: ColumnMapping, workspaceId:
         else if (["refund", "reembolso", "estorno"].includes(typeValue)) type = "REFUND";
         else throw new Error("Tipo não reconhecido. Use receita, despesa ou estorno.");
       }
-      const base: NormalizedTransaction = { date, description, amountCents: Math.abs(amount), type, merchant: get(mapping.merchant).slice(0, 200) || null, externalId: get(mapping.externalId).slice(0, 200) || null, categoryId: null, tags: [], source: "CSV", fingerprint: "" };
+      const base: NormalizedTransaction = { date, description, amountCents: Math.abs(amount), type, merchant: get(mapping.merchant).slice(0, 200) || null, externalId: get(mapping.externalId).slice(0, 200) || null, categoryId: null, tags: [], source, fingerprint: "" };
       base.fingerprint = transactionFingerprint(workspaceId, accountId, base);
       const duplicate = seen.has(base.fingerprint);
       seen.add(base.fingerprint);
