@@ -45,9 +45,9 @@ export function moneyInput(cents: number) {
 export function normalizeDate(value: string): string {
   const trimmed = value.trim();
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
-  const br = /^(\d{2})[/-](\d{2})[/-](\d{4})$/.exec(trimmed);
+  const br = /^(\d{2})[/.\-](\d{2})[/.\-](\d{2}|\d{4})$/.exec(trimmed);
   if (!iso && !br) throw new Error("Data inválida. Use DD/MM/AAAA ou AAAA-MM-DD.");
-  const date = iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : `${br![3]}-${br![2]}-${br![1]}`;
+  const year=br?.[3].length===2?`20${br[3]}`:br?.[3];const date = iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : `${year}-${br![2]}-${br![1]}`;
   const parsed = new Date(`${date}T00:00:00.000Z`);
   if (!Number.isFinite(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== date) throw new Error("Data inexistente.");
   if (date < "1900-01-01" || date > "2200-12-31") throw new Error("Data fora do intervalo permitido.");

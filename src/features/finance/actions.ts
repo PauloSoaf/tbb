@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/tenancy/requirePermission";
 import { dateOnly, parseMoney } from "./money";
 import { CsvFinanceImportParser, previewCsv, transactionFingerprint, type ImportPreviewRow } from "./import-engine";
+import { ensureUnassignedAccount } from "./unassigned-account";
 
 const text = (fd: FormData, key: string) => String(fd.get(key) || "").trim();
 const name = (fd: FormData, key = "name") => z.string().min(1, "Informe um nome.").max(200).parse(text(fd, key));
@@ -29,6 +30,7 @@ async function accountRef(workspaceId: string, accountId: string, required = tru
   if (!account) throw new Error("Selecione uma conta ativa deste workspace em BRL.");
   return account;
 }
+async function accountOrUnassigned(workspaceId:string,accountId:string){const account=await accountRef(workspaceId,accountId,false);return account||prisma.$transaction(tx=>ensureUnassignedAccount(tx,workspaceId))}
 async function categoryRef(workspaceId: string, categoryId: string) {
   if (!categoryId) return null;
   const category = await prisma.financeCategory.findFirst({ where: { id: categoryId, workspaceId, isArchived: false } });
@@ -73,14 +75,16 @@ export async function createDefaultCategories() {
 export async function saveTransaction(fd: FormData) {
   const ctx = await requirePermission("WRITE");
   try {
-    const account = await accountRef(ctx.workspaceId, text(fd, "accountId"));
+    let account = await accountRef(ctx.workspaceId, text(fd, "accountId"), false);
     const type = enumValue(fd, "type", ["INCOME", "EXPENSE", "TRANSFER", "REFUND", "ADJUSTMENT"], "EXPENSE");
+    if(type==="TRANSFER"&&!account)throw new Error("Transferências precisam de uma conta de origem.");
+    if(!account)account=await prisma.$transaction(tx=>ensureUnassignedAccount(tx,ctx.workspaceId));
     const destination = type === "TRANSFER" ? await accountRef(ctx.workspaceId, text(fd, "destinationAccountId")) : null;
-    if (destination?.id === account!.id) throw new Error("A conta de destino deve ser diferente da origem.");
+    if (destination?.id === account.id) throw new Error("A conta de destino deve ser diferente da origem.");
     const category = type === "TRANSFER" ? null : await categoryRef(ctx.workspaceId, text(fd, "categoryId"));
     const installmentNumber = integer(fd, "installmentNumber", 1, 999), installmentTotal = integer(fd, "installmentTotal", 1, 999);
     if (Boolean(installmentNumber) !== Boolean(installmentTotal) || (installmentNumber && installmentTotal && installmentNumber > installmentTotal)) throw new Error("Confira número e total de parcelas.");
-    const data = { accountId: account!.id, destinationAccountId: destination?.id || null, categoryId: category?.id || null, type, description: name(fd, "description"), merchant: optional(fd, "merchant", 200), amountCents: cents(fd, "amount", type === "ADJUSTMENT", type === "ADJUSTMENT"), currency: "BRL", date: date(fd, "date"), competenceDate: optionalDate(fd, "competenceDate"), installmentNumber, installmentTotal, notes: optional(fd, "notes", 2000), tags: text(fd, "tags").split(",").map(t => t.trim()).filter(Boolean).slice(0, 20).map(t => z.string().max(50).parse(t)), recurring: fd.get("recurring") === "on" };
+    const data = { accountId: account.id, destinationAccountId: destination?.id || null, categoryId: category?.id || null, type, description: name(fd, "description"), merchant: optional(fd, "merchant", 200), amountCents: cents(fd, "amount", type === "ADJUSTMENT", type === "ADJUSTMENT"), currency: "BRL", date: date(fd, "date"), competenceDate: optionalDate(fd, "competenceDate"), installmentNumber, installmentTotal, notes: optional(fd, "notes", 2000), tags: text(fd, "tags").split(",").map(t => t.trim()).filter(Boolean).slice(0, 20).map(t => z.string().max(50).parse(t)), recurring: fd.get("recurring") === "on" };
     await prisma.$transaction(async tx => {
       const id = text(fd, "id");
       if (id) { const result = await tx.financeTransaction.updateMany({ where: { id, workspaceId: ctx.workspaceId }, data: { ...data, revision: { increment: 1 } } }); if (!result.count) throw new Error("Lançamento não encontrado."); await log(tx, ctx, "transaction.updated", "FinanceTransaction", id); }
@@ -193,9 +197,9 @@ export async function saveTransactionRule(fd: FormData) {
 export async function uploadCsv(fd: FormData) {
   const ctx = await requirePermission("WRITE");
   try {
-    const account = await accountRef(ctx.workspaceId, text(fd, "accountId"));
+    const account = await accountOrUnassigned(ctx.workspaceId, text(fd, "accountId"));
     const file = fd.get("file");
-    if (!(file instanceof File) || file.size === 0 || file.size > 1_000_000 || !file.name.toLowerCase().endsWith(".csv")) throw new Error("Selecione um CSV UTF-8 de até 1 MB.");
+    if (!(file instanceof File) || file.size === 0 || file.size > 5_000_000 || !file.name.toLowerCase().endsWith(".csv")) throw new Error("Selecione um CSV UTF-8 de até 5 MB.");
     const rawContent = await file.text();
     const parsed = CsvFinanceImportParser.parse(rawContent);
     const batch = await prisma.importBatch.create({ data: { workspaceId: ctx.workspaceId, accountId: account!.id, fileName: file.name.slice(0, 200), fileSize: file.size, rawContent, rowCount: parsed.rows.length } });
@@ -206,7 +210,7 @@ export async function uploadCsv(fd: FormData) {
 export async function uploadPastedData(fd: FormData) {
   const ctx = await requirePermission("WRITE");
   try {
-    const account = await accountRef(ctx.workspaceId, text(fd, "accountId"));
+    const account = await accountOrUnassigned(ctx.workspaceId, text(fd, "accountId"));
     const rawContent = text(fd, "content");
     if (!rawContent || Buffer.byteLength(rawContent, "utf8") > 1_000_000) throw new Error("Cole dados tabulares de até 1 MB.");
     const parsed = CsvFinanceImportParser.parse(rawContent);
@@ -220,7 +224,7 @@ function csvCell(value: string) { return `"${value.replace(/"/g, '""')}"`; }
 export async function uploadFinanceDocument(fd: FormData) {
   const ctx = await requirePermission("WRITE");
   try {
-    const account = await accountRef(ctx.workspaceId, text(fd, "accountId"));
+    const account = await accountOrUnassigned(ctx.workspaceId, text(fd, "accountId"));
     const file = fd.get("file");
     if (!(file instanceof File) || !file.size || file.size > 5_000_000) throw new Error("Selecione um CSV ou PDF de até 5 MB.");
     const lower = file.name.toLowerCase();
@@ -240,14 +244,15 @@ export async function uploadFinanceDocument(fd: FormData) {
     const content = Array.isArray(extracted.text) ? extracted.text.join("\n") : extracted.text;
     if (!content || content.trim().length < 20) throw new Error("Este PDF parece digitalizado. A extração automática precisa de OCR.");
     const candidates: string[] = [];
-    const datePattern = /(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}-\d{2}-\d{2})/;
+    const datePattern = /(\d{2}[/.\-]\d{2}(?:[/.\-](?:\d{2}|\d{4}))?|\d{4}-\d{2}-\d{2})/;
     const amountPattern = /([-+]?\s*(?:R\$\s*)?(?:\d{1,3}(?:[.,]\d{3})+|\d+)[.,]\d{2})\s*$/;
     for (const rawLine of content.split(/\r?\n/).map(line => line.trim()).filter(Boolean)) {
       const dateMatch = rawLine.match(datePattern); const amountMatch = rawLine.match(amountPattern);
       if (!dateMatch || !amountMatch || dateMatch.index === undefined || amountMatch.index === undefined || amountMatch.index <= dateMatch.index) continue;
       const description = rawLine.slice(dateMatch.index + dateMatch[0].length, amountMatch.index).replace(/\s+/g, " ").trim();
       if (description.length < 2) continue;
-      candidates.push([csvCell(dateMatch[0]), csvCell(description.slice(0, 300)), csvCell(amountMatch[1].replace(/\s/g, ""))].join(";"));
+      const rawDate=dateMatch[0];const normalizedPdfDate=/^\d{2}[/.\-]\d{2}$/.test(rawDate)?`${rawDate}/${new Date().getUTCFullYear()}`:rawDate;
+      candidates.push([csvCell(normalizedPdfDate), csvCell(description.slice(0, 300)), csvCell(amountMatch[1].replace(/\s/g, ""))].join(";"));
     }
     if (!candidates.length) throw new Error("O PDF tem texto, mas nenhuma linha financeira segura foi reconhecida. Use CSV ou cole os dados na grade.");
     const rawContent = `Data;Descrição;Valor\n${candidates.join("\n")}`;
@@ -344,7 +349,7 @@ const gridTransactionSchema = z.object({
   description: z.string().trim().min(1).max(300),
   merchant: z.string().trim().max(200).optional(),
   categoryId: z.string().optional(),
-  accountId: z.string().min(1),
+  accountId: z.string().optional(),
   type: z.enum(["INCOME", "EXPENSE", "REFUND", "ADJUSTMENT"]),
   amount: z.string().min(1),
   tags: z.string().max(1000).optional(),
@@ -356,7 +361,7 @@ export async function saveGridTransactions(input: GridTransactionInput[]) {
   const ctx = await requirePermission("WRITE");
   try {
     const rows = z.array(gridTransactionSchema).min(1).max(500).parse(input);
-    const accountIds = [...new Set(rows.map((row) => row.accountId))];
+    const accountIds = [...new Set(rows.flatMap((row) => row.accountId ? [row.accountId] : []))];
     const categoryIds = [...new Set(rows.map((row) => row.categoryId).filter((id): id is string => Boolean(id)))];
     const [accountCount, categoryCount] = await Promise.all([
       prisma.account.count({ where: { workspaceId: ctx.workspaceId, id: { in: accountIds }, isArchived: false, currency: "BRL" } }),
@@ -366,7 +371,7 @@ export async function saveGridTransactions(input: GridTransactionInput[]) {
     const data = rows.map((row) => ({
       id: row.id && !row.id.startsWith("draft-") ? row.id : null,
       workspaceId: ctx.workspaceId,
-      accountId: row.accountId,
+      accountId: row.accountId || null,
       categoryId: row.categoryId || null,
       date: dateOnly(row.date),
       description: row.description,
@@ -382,10 +387,13 @@ export async function saveGridTransactions(input: GridTransactionInput[]) {
       const existingIds = data.flatMap((row) => row.id ? [row.id] : []);
       const owned = await tx.financeTransaction.count({ where: { workspaceId: ctx.workspaceId, id: { in: existingIds }, type: { not: "TRANSFER" } } });
       if (owned !== existingIds.length) throw new Error("Uma transação editada não está disponível neste workspace.");
+      let unassignedId:string|null=null;
       for (const row of data) {
         const { id, ...fields } = row;
-        if (id) await tx.financeTransaction.update({ where: { id, workspaceId: ctx.workspaceId }, data: { ...fields, source: undefined, revision: { increment: 1 } } });
-        else await tx.financeTransaction.create({ data: fields });
+        if(!fields.accountId){if(!unassignedId)unassignedId=(await ensureUnassignedAccount(tx,ctx.workspaceId)).id;fields.accountId=unassignedId}
+        const resolvedFields={...fields,accountId:fields.accountId!};
+        if (id) await tx.financeTransaction.update({ where: { id, workspaceId: ctx.workspaceId }, data: { ...resolvedFields, source: undefined, revision: { increment: 1 } } });
+        else await tx.financeTransaction.create({ data: resolvedFields });
       }
       await log(tx, ctx, "transactions.grid_saved", "FinanceTransaction", "batch", { count: data.length, created: data.filter(row => !row.id).length });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });

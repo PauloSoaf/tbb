@@ -8,6 +8,7 @@ TBB é um workspace pessoal para organizar hábitos, tarefas, projetos, metas, f
 - PostgreSQL e Prisma
 - TanStack Table v9 para a planilha financeira
 - Bklit UI/Visx para analytics
+- OpenAI Responses API opcional para captura estruturada e pesquisa web pelo assistente
 - Zod, Vitest e ESLint
 - Sessões opacas persistentes, RBAC por workspace e storage privado
 
@@ -41,6 +42,8 @@ npx prisma migrate status
 - Today, Insights, Weekly Review, Integrations, Settings e Admin
 
 A grade financeira aceita edição inline e clipboard TSV/CSV. Importações CSV e PDF passam por staging, mapeamento, validação, regras, deduplicação e confirmação. Drafts nunca alteram analytics antes de serem salvos.
+
+O Finance também interpreta texto livre e mensagens copiadas do WhatsApp. Configure `OPENAI_API_KEY` para usar Structured Outputs do GPT; sem a chave, os exemplos simples continuam funcionando com o parser local. `OPENAI_FINANCE_MODEL` e `OPENAI_ASSISTANT_MODEL` permitem fixar os modelos. A busca web só é acionada pelo assistente quando o pedido contém uma intenção explícita de pesquisar informação atual.
 
 ## Documentação
 

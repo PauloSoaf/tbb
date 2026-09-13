@@ -39,19 +39,21 @@ function parseRecords(content: string, delimiter: string) {
 export const CsvFinanceImportParser: FinanceImportParser = {
   format: "CSV",
   parse(content) {
-    const clean = content.replace(/^\uFEFF/, "");
-    if (Buffer.byteLength(clean, "utf8") > 1_000_000) throw new Error("CSV deve ter no máximo 1 MB.");
+    let clean = content.replace(/^\uFEFF/, "");
+    const declared=clean.match(/^sep=([,;\t])\r?\n/i);if(declared)clean=clean.slice(declared[0].length);
+    if (Buffer.byteLength(clean, "utf8") > 5_000_000) throw new Error("CSV deve ter no máximo 5 MB.");
     if (clean.includes("\uFFFD") || clean.includes("\0")) throw new Error("Salve o arquivo em UTF-8 antes de importar.");
     let delimiter = ",";
-    let headerQuotes = false, commas = 0, semicolons = 0;
+    let headerQuotes = false, commas = 0, semicolons = 0, tabs = 0;
     for (let i = 0; i < clean.length; i++) {
       const char = clean[i];
       if (char === '"') { if (headerQuotes && clean[i + 1] === '"') { i++; continue; } headerQuotes = !headerQuotes; }
       if (!headerQuotes && (char === "\n" || char === "\r")) break;
       if (!headerQuotes && char === ",") commas++;
       if (!headerQuotes && char === ";") semicolons++;
+      if (!headerQuotes && char === "\t") tabs++;
     }
-    if (semicolons > commas) delimiter = ";";
+    if (tabs>commas&&tabs>semicolons)delimiter="\t";else if (semicolons > commas) delimiter = ";";
     const [headers, ...rows] = parseRecords(clean, delimiter);
     if (!headers || headers.length < 2 || !rows.length) throw new Error("CSV precisa de cabeçalho e pelo menos uma linha.");
     if (headers.some(h => !h) || new Set(headers).size !== headers.length) throw new Error("Cabeçalhos devem ser únicos e não vazios.");

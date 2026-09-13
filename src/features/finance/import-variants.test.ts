@@ -1,0 +1,4 @@
+import {describe,expect,it} from "vitest";
+import {CsvFinanceImportParser} from "./import-engine";
+import {normalizeDate,parseMoney} from "./money";
+describe("variações de importação financeira",()=>{it("aceita CSV separado por vírgula, ponto e vírgula, tab e declaração sep",()=>{expect(CsvFinanceImportParser.parse("Data,Descrição,Valor\n13/09/2026,Uber,-29.00").delimiter).toBe(",");expect(CsvFinanceImportParser.parse("sep=;\nData;Descrição;Valor\n13/09/2026;Uber;-29,00").delimiter).toBe(";");expect(CsvFinanceImportParser.parse("Date\tMemo\tAmount\n2026-09-13\tUber\t-29.00").delimiter).toBe("\t")});it("normaliza datas e valores bancários comuns",()=>{expect(normalizeDate("13.09.26")).toBe("2026-09-13");expect(parseMoney("R$ 1.234,56")).toBe(123456);expect(parseMoney("-29.90",true)).toBe(-2990)})});

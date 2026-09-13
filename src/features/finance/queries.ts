@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { addDays, dateKeyToUTC, startOfMonth } from "@/lib/dates";
+import { isUnassignedAccount } from "@/features/finance/unassigned-account";
 
 export async function financeSummary(workspaceId: string, today: string) {
   const monthStart=dateKeyToUTC(startOfMonth(today)); const tomorrow=dateKeyToUTC(addDays(today,1));
@@ -15,7 +16,7 @@ export async function financeSummary(workspaceId: string, today: string) {
   const total=(type:string)=>month.find(row=>row.type===type)?._sum.amountCents||0;
   const income=total("INCOME")+total("REFUND"), expenses=total("EXPENSE");
   const subscriptionMonthly=subscriptions.reduce((sum,s)=>sum+Math.round(s.amountCents*(s.billingCycle==="WEEKLY"?52/12:s.billingCycle==="QUARTERLY"?1/3:s.billingCycle==="YEARLY"?1/12:s.billingCycle==="CUSTOM"&&s.customDays?30/s.customDays:1)),0);
-  return {accounts:accountBalances,income,expenses,savings:income-expenses,savingsRate:income?Math.round((income-expenses)/income*100):0,subscriptionMonthly,debtCents:debts._sum.remainingBalanceCents||0,savingsCurrent:savings._sum.currentAmountCents||0,savingsTarget:savings._sum.targetAmountCents||0,netWorth:accountBalances.reduce((sum,a)=>sum+a.balanceCents,0)-(debts._sum.remainingBalanceCents||0)};
+  return {accounts:accountBalances,income,expenses,savings:income-expenses,savingsRate:income?Math.round((income-expenses)/income*100):0,subscriptionMonthly,debtCents:debts._sum.remainingBalanceCents||0,savingsCurrent:savings._sum.currentAmountCents||0,savingsTarget:savings._sum.targetAmountCents||0,netWorth:accountBalances.filter(account=>!isUnassignedAccount(account)).reduce((sum,a)=>sum+a.balanceCents,0)-(debts._sum.remainingBalanceCents||0)};
 }
 
 export async function monthlyCashFlow(workspaceId: string, months=6) {
