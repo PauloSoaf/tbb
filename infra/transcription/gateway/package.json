@@ -1,0 +1,21 @@
+{
+  "name": "@nutriopus/transcription-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "HMAC-authenticated WebSocket gateway for NutriOpus realtime transcription",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "check": "node --check src/server.mjs && node --check src/config.mjs && node --check src/token.mjs",
+    "test": "node --test",
+    "mint-token": "node scripts/mint-token.mjs",
+    "check-provider": "node scripts/check-provider.mjs",
+    "smoke-realtime": "node scripts/smoke-realtime.mjs"
+  },
+  "dependencies": {
+    "ws": "8.21.1"
+  }
+}
