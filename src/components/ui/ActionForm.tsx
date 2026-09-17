@@ -9,7 +9,11 @@ export function ActionForm({ action, children, className, resetOnSuccess = true 
   return <form ref={ref} className={className} action={(data) => {
     setError(""); startTransition(async () => {
       try { const result = await action(data); if (result.error) setError(result.error);
-        else { if (result.success) toast.success(result.success); if (resetOnSuccess) ref.current?.reset(); }
+        else {
+          if (result.success) toast.success(result.success);
+          if (resetOnSuccess) ref.current?.reset();
+          ref.current?.dispatchEvent(new CustomEvent("tbb:form-success",{bubbles:true,detail:result}));
+        }
       } catch { setError("Não foi possível salvar. Tente novamente."); }
     });
   }} aria-busy={pending}><fieldset disabled={pending} className="form-contents">{children}</fieldset>

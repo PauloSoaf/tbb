@@ -1,21 +1,49 @@
-import Link from "next/link";
-import { Plus } from "lucide-react";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { Modal } from "@/components/ui/Modal";
-import { FinanceFlowChart } from "@/components/TbbCharts";
-import { FinanceDataGrid } from "@/features/finance/FinanceDataGrid";
-import { NaturalLanguageCapture } from "@/features/finance/NaturalLanguageCapture";
-import { AccountForm } from "@/features/finance/forms";
-import { getWorkspaceContext } from "@/lib/workspace";
+import { FinanceOverview } from "@/features/finance/FinanceOverview";
+import { PartnerFinanceSummary, type FinanceScopeMetrics } from "@/features/finance/PartnerFinanceSummary";
+import { financeOverview } from "@/features/finance/overview-query";
+import { EmptyState, PageHeader } from "@/components/ui/PageHeader";
 import { dayKey } from "@/lib/dates";
-import { financeSummary,monthlyCashFlow } from "@/features/finance/queries";
-import { money } from "@/features/finance/money";
 import { prisma } from "@/lib/prisma";
-import { isUnassignedAccount } from "@/features/finance/unassigned-account";
+import { getWorkspaceContext, getPartnerContext } from "@/lib/workspace";
 
-export default async function FinancePage(){const context=await getWorkspaceContext();const today=dayKey(new Date(),context.workspace.timezone);const [summary,flow,transactions,categories]=await Promise.all([financeSummary(context.workspaceId,today),monthlyCashFlow(context.workspaceId),prisma.financeTransaction.findMany({where:{workspaceId:context.workspaceId,type:{not:"TRANSFER"}},orderBy:[{date:"desc"},{createdAt:"desc"}],take:20}),prisma.financeCategory.findMany({where:{workspaceId:context.workspaceId,isArchived:false},select:{id:true,name:true},orderBy:{name:"asc"}})]);const accounts=summary.accounts.map(({id,name})=>({id,name}));const captureAccounts=summary.accounts.filter(account=>!isUnassignedAccount(account)).map(({id,name})=>({id,name}));const rows=transactions.map(item=>({id:item.id,date:item.date.toISOString().slice(0,10),description:item.description,merchant:item.merchant||"",categoryId:item.categoryId||"",accountId:item.accountId,type:item.type as "INCOME"|"EXPENSE"|"REFUND"|"ADJUSTMENT",amount:(item.amountCents/100).toFixed(2).replace(".",","),tags:item.tags.join(", "),source:item.source}));return <div className="stack"><PageHeader eyebrow="MONEY · OVERVIEW" title="Seu dinheiro, no mesmo lugar." description="Resumo, contas, captura e transações recentes sem trocar de tela."><Link className="button-secondary" href="/finance/imports">Importar CSV/PDF</Link><Modal title="Criar conta" trigger={<><Plus size={15}/>Nova conta</>}><AccountForm/></Modal></PageHeader>
-<nav className="finance-section-nav"><a href="#resumo">Resumo</a><a href="#captura">Adicionar por texto</a><a href="#transacoes">Transações</a><a href="#contas">Contas</a></nav>
-<div id="resumo" className="stat-grid"><div className="stat-card"><span>Patrimônio líquido</span><strong>{money(summary.netWorth)}</strong></div><div className="stat-card"><span>Receitas no mês</span><strong className="text-success">{money(summary.income)}</strong></div><div className="stat-card"><span>Despesas no mês</span><strong className="text-danger">{money(summary.expenses)}</strong></div><div className="stat-card"><span>Taxa de economia</span><strong>{summary.savingsRate}%</strong></div></div>
-<div id="captura"><NaturalLanguageCapture accounts={captureAccounts} today={today}/></div>
-<section id="transacoes" className="panel stack"><div className="row justify-between"><div><h2>Transações recentes</h2><p className="muted">Adicione mesmo sem conta e vincule uma depois diretamente na grade.</p></div><Link href="/finance/transactions">Ver histórico completo</Link></div><FinanceDataGrid initialRows={rows} accounts={accounts} categories={categories} today={today}/></section>
-<div className="split-grid"><section className="panel stack"><div><h2>Receitas x despesas</h2><p className="muted">Quanto entrou e saiu em cada mês.</p></div>{flow.length?<FinanceFlowChart data={flow}/>:<p className="empty-state muted">Adicione transações para formar o histórico.</p>}<div className="chart-legend"><span><i className="legend-income"/>Receitas</span><span><i className="legend-expense"/>Despesas</span></div></section><section id="contas" className="panel stack"><div className="row justify-between"><h2>Contas</h2><Modal title="Criar conta" trigger={<><Plus size={14}/>Adicionar</>}><AccountForm/></Modal></div>{summary.accounts.map(account=>{const unassigned=isUnassignedAccount(account);return <div className="list-item" key={account.id}><div><h3>{account.name}</h3><small>{unassigned?"Transações aguardando vínculo":account.institution||account.type}</small></div><strong>{unassigned?"—":money(account.balanceCents)}</strong></div>})}{!summary.accounts.length&&<p className="empty-state muted">Você pode começar sem conta e cadastrá-la depois.</p>}<div className="list-item"><span>Dívidas ativas</span><strong className="text-danger">{money(summary.debtCents)}</strong></div><div className="list-item"><span>Assinaturas / mês</span><strong>{money(summary.subscriptionMonthly)}</strong></div></section></div></div>}
+function toScopeMetrics(overview: Awaited<ReturnType<typeof financeOverview>>): FinanceScopeMetrics {
+  return { netWorthCents: overview.metrics.netWorthCents, incomeCents: overview.metrics.incomeCents, expensesCents: overview.metrics.expensesCents, balanceCents: overview.metrics.balanceCents };
+}
+
+export default async function FinancePage({ searchParams }: { searchParams: Promise<{ scope?: string }> }) {
+  const context = await getWorkspaceContext();
+  const { scope: rawScope } = await searchParams;
+  const scope = rawScope === "partner" || rawScope === "together" ? rawScope : "me";
+  const today = dayKey(new Date(), context.workspace.timezone);
+
+  if (scope !== "me") {
+    const partnerAccess = await getPartnerContext("finance");
+    if (!partnerAccess) {
+      return <div className="stack">
+        <PageHeader eyebrow="FINANCE" title={scope === "partner" ? "Parceiro" : "Juntos"}/>
+        <EmptyState title="Nada para ver aqui ainda" description="Conecte-se a um parceiro em Configurações → Partner, ou peça para ele compartilhar o módulo Finance."/>
+      </div>;
+    }
+    const [partnerOverview, partnerWorkspace] = await Promise.all([
+      financeOverview(partnerAccess.partnerWorkspaceId, today),
+      prisma.workspace.findUnique({ where: { id: partnerAccess.partnerWorkspaceId }, select: { name: true } }),
+    ]);
+    const partnerMetrics = toScopeMetrics(partnerOverview);
+    const partnerName = partnerWorkspace?.name || "Parceiro";
+    if (scope === "partner") {
+      return <div className="stack">
+        <PageHeader eyebrow="FINANCE" title="Parceiro" description="Visão somente leitura dos dados que seu parceiro compartilhou."/>
+        <PartnerFinanceSummary scope="partner" me={partnerMetrics} partner={partnerMetrics} partnerName={partnerName}/>
+      </div>;
+    }
+    const meOverview = await financeOverview(context.workspaceId, today);
+    return <div className="stack">
+      <PageHeader eyebrow="FINANCE" title="Juntos" description="Renda, despesas e saldo somados. Cada workspace continua com seus próprios registros."/>
+      <PartnerFinanceSummary scope="together" me={toScopeMetrics(meOverview)} partner={partnerMetrics} partnerName={partnerName}/>
+    </div>;
+  }
+
+  const overview = await financeOverview(context.workspaceId, today);
+  const captureAccounts = overview.accounts.filter((account) => !account.unassigned).map(({ id, name, institution, type }) => ({ id, name, institution, type }));
+  return <FinanceOverview data={overview} captureAccounts={captureAccounts}/>;
+}

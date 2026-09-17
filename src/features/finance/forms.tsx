@@ -1,13 +1,11 @@
 import { ActionForm } from "@/components/ui/ActionForm";
-import { saveAccount, saveBudget, saveCategory, saveDebt, saveSavingsGoal, saveSubscription, saveTransactionRule } from "./actions";
+import { saveBudget, saveCategory, saveDebt, saveSavingsGoal, saveSubscription, saveTransactionRule } from "./actions";
 
 type Option = { id: string; name: string };
 const Save = ({ label = "Salvar" }: { label?: string }) => <button className="button" type="submit">{label}</button>;
 const Money = ({ name, label, value }: { name: string; label: string; value?: number | null }) => <label>{label}<input name={name} inputMode="decimal" defaultValue={value == null ? "" : (value / 100).toFixed(2).replace(".", ",")} required /></label>;
 
-export function AccountForm({ account }: { account?: { id: string; name: string; type: string; institution: string | null; initialBalanceCents: number; creditLimitCents: number | null; closingDay: number | null; dueDay: number | null } }) {
-  return <ActionForm action={saveAccount} className="form-grid" resetOnSuccess={!account}>{account&&<input type="hidden" name="id" value={account.id}/>}<label>Nome<input name="name" defaultValue={account?.name} required maxLength={200}/></label><label>Tipo<select name="type" defaultValue={account?.type||"CHECKING"}>{[["CHECKING","Conta corrente"],["SAVINGS","Poupança"],["CASH","Dinheiro"],["CREDIT_CARD","Cartão de crédito"],["INVESTMENT","Investimento"],["DIGITAL_WALLET","Carteira digital"],["OTHER","Outro"]].map(([v,l])=><option value={v} key={v}>{l}</option>)}</select></label><label>Instituição<input name="institution" defaultValue={account?.institution||""}/></label><Money name="initialBalance" label="Saldo inicial" value={account?.initialBalanceCents}/><Money name="creditLimit" label="Limite de crédito" value={account?.creditLimitCents}/><label>Fechamento<input name="closingDay" type="number" min={1} max={31} defaultValue={account?.closingDay||""}/></label><label>Vencimento<input name="dueDay" type="number" min={1} max={31} defaultValue={account?.dueDay||""}/></label><Save/></ActionForm>;
-}
+export { AccountForm } from "./AccountForm";
 
 export function CategoryForm({ categories }: { categories: (Option & { type: string })[] }) {
   return <ActionForm action={saveCategory} className="form-grid"><label>Nome<input name="name" required/></label><label>Tipo<select name="type" defaultValue="EXPENSE"><option value="EXPENSE">Despesa</option><option value="INCOME">Receita</option></select></label><label>Categoria principal<select name="parentId"><option value="">Nenhuma</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Cor<input name="color" type="color" defaultValue="#605de9"/></label><label>Ícone<input name="icon" defaultValue="tag"/></label><Save label="Criar categoria"/></ActionForm>;

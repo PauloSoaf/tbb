@@ -54,6 +54,29 @@ export async function saveAccount(fd: FormData) {
   } catch (error) { return failure(error); }
 }
 
+export async function saveMonthlyIncome(fd:FormData){
+  const ctx=await requirePermission("WRITE");
+  try{
+    const amountCents=cents(fd,"amount");
+    const entryDate=date(fd,"date");
+    const account=await accountOrUnassigned(ctx.workspaceId,text(fd,"accountId"));
+    const monthStart=dateOnly(`${entryDate.toISOString().slice(0,7)}-01`);
+    const nextMonth=new Date(Date.UTC(monthStart.getUTCFullYear(),monthStart.getUTCMonth()+1,1));
+    await prisma.$transaction(async tx=>{
+      const existing=await tx.financeTransaction.findFirst({where:{workspaceId:ctx.workspaceId,type:"INCOME",date:{gte:monthStart,lt:nextMonth},OR:[{tags:{has:"renda-mensal:tbb"}},{recurring:true,description:{contains:"renda mensal",mode:"insensitive"}}]},orderBy:{createdAt:"desc"}});
+      if(existing){
+        await tx.financeTransaction.update({where:{id:existing.id},data:{accountId:account.id,amountCents,date:entryDate,description:"Renda mensal",recurring:true,tags:[...new Set([...existing.tags,"renda-mensal:tbb"])],source:"QUICK_INCOME",revision:{increment:1}}});
+        await log(tx,ctx,"income.monthly_updated","FinanceTransaction",existing.id,{amountCents});
+      }else{
+        const item=await tx.financeTransaction.create({data:{workspaceId:ctx.workspaceId,accountId:account.id,type:"INCOME",description:"Renda mensal",amountCents,currency:"BRL",date:entryDate,recurring:true,tags:["renda-mensal:tbb"],source:"QUICK_INCOME"}});
+        await log(tx,ctx,"income.monthly_created","FinanceTransaction",item.id,{amountCents});
+      }
+    });
+    invalidate();
+    return {success:"Renda mensal atualizada."};
+  }catch(error){return failure(error)}
+}
+
 export async function saveCategory(fd: FormData) {
   const ctx = await requirePermission("WRITE");
   try {
