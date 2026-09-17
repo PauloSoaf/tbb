@@ -23,7 +23,7 @@ const registerSchema = credentialsSchema.extend({
     .refine((value) => Buffer.byteLength(value, "utf8") <= 72, "A senha deve ter no máximo 72 bytes."),
 });
 
-async function allowAttempt(scope: string, identifier: string, limit: number) {
+export async function allowAttempt(scope: string, identifier: string, limit: number) {
   const windowStart = new Date(Math.floor(Date.now() / 900000) * 900000);
   const key = createHash("sha256").update(`${scope}:${identifier}:${windowStart.toISOString()}`).digest("hex");
   const attempt = await prisma.authAttempt.upsert({ where: { key },

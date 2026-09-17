@@ -23,6 +23,14 @@ enum BillingStatus {
   CANCELED
 }
 
+enum PartnerConnectionStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  REVOKED
+  BLOCKED
+}
+
 model User {
   id String @id @default(cuid())
   name String
@@ -36,6 +44,8 @@ model User {
   sessions UserSession[]
   notifications Notification[]
   activityEvents ActivityEvent[]
+  partnerInvitesCreated PartnerConnection[] @relation("PartnerConnectionRequestedBy")
+  partnerInvitesAccepted PartnerConnection[] @relation("PartnerConnectionAcceptedBy")
 }
 
 model Workspace {
@@ -57,6 +67,9 @@ model Workspace {
   usageCounters UsageCounter[]
   storageFiles StorageFile[]
   rolePermissions RolePermission[]
+  partnerConnectionsAsRequester PartnerConnection[] @relation("PartnerConnectionRequester")
+  partnerConnectionsAsReceiver PartnerConnection[] @relation("PartnerConnectionReceiver")
+  partnerSharingPolicies PartnerSharingPolicy[]
 }
 
 model Membership {
@@ -148,6 +161,39 @@ model MemberPermissionOverride {
   membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
   permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
   @@unique([membershipId, permissionId])
+}
+
+model PartnerConnection {
+  id String @id @default(cuid())
+  requesterWorkspaceId String
+  receiverWorkspaceId String?
+  requestedByUserId String
+  acceptedByUserId String?
+  status PartnerConnectionStatus @default(PENDING)
+  inviteTokenHash String? @unique
+  inviteExpiresAt DateTime?
+  createdAt DateTime @default(now())
+  acceptedAt DateTime?
+  revokedAt DateTime?
+  requesterWorkspace Workspace @relation("PartnerConnectionRequester", fields: [requesterWorkspaceId], references: [id], onDelete: Cascade)
+  receiverWorkspace Workspace? @relation("PartnerConnectionReceiver", fields: [receiverWorkspaceId], references: [id], onDelete: Cascade)
+  requestedByUser User @relation("PartnerConnectionRequestedBy", fields: [requestedByUserId], references: [id])
+  acceptedByUser User? @relation("PartnerConnectionAcceptedBy", fields: [acceptedByUserId], references: [id])
+  sharingPolicies PartnerSharingPolicy[]
+  @@index([requesterWorkspaceId, status])
+  @@index([receiverWorkspaceId, status])
+}
+
+model PartnerSharingPolicy {
+  id String @id @default(cuid())
+  connectionId String
+  ownerWorkspaceId String
+  module String
+  enabled Boolean @default(true)
+  updatedAt DateTime @updatedAt
+  connection PartnerConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  ownerWorkspace Workspace @relation(fields: [ownerWorkspaceId], references: [id], onDelete: Cascade)
+  @@unique([connectionId, ownerWorkspaceId, module])
 }
 
 model SubscriptionPlan {
