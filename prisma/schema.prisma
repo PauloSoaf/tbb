@@ -34,62 +34,90 @@ enum BillingStatus {
   CANCELED
 }
 
+enum PartnerConnectionStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  REVOKED
+  BLOCKED
+}
+
 model User {
-  id             String          @id @default(cuid())
-  name           String
-  email          String          @unique
-  passwordHash   String
-  isGlobalAdmin  Boolean         @default(false)
-  isActive       Boolean         @default(true)
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  memberships    Membership[]
-  sessions       UserSession[]
-  notifications  Notification[]
-  activityEvents ActivityEvent[]
+  id                     String              @id @default(cuid())
+  name                   String
+  email                  String              @unique
+  passwordHash           String
+  isGlobalAdmin          Boolean             @default(false)
+  isActive               Boolean             @default(true)
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  memberships            Membership[]
+  sessions               UserSession[]
+  notifications          Notification[]
+  activityEvents         ActivityEvent[]
+  partnerInvitesCreated  PartnerConnection[] @relation("PartnerConnectionRequestedBy")
+  partnerInvitesAccepted PartnerConnection[] @relation("PartnerConnectionAcceptedBy")
 }
 
 model Workspace {
-  habits              Habit[]
-  habitSchedules      HabitSchedule[]
-  habitEntries        HabitEntry[]
-  tasks               Task[]
-  projects            Project[]
-  goals               Goal[]
-  accounts            Account[]
-  financeCategories   FinanceCategory[]
-  financeTransactions FinanceTransaction[]
-  budgets             Budget[]
-  subscriptions       Subscription[]
-  debts               Debt[]
-  savingsGoals        SavingsGoal[]
-  importBatches       ImportBatch[]
-  importMappings      ImportMapping[]
-  transactionRules    TransactionRule[]
-  companies           Company[]
-  applications        Application[]
-  contacts            Contact[]
-  interviews          Interview[]
-  offers              Offer[]
-  careerDocuments     CareerDocument[]
-  id                  String                     @id @default(cuid())
-  name                String
-  slug                String                     @unique
-  timezone            String                     @default("America/Manaus")
-  locale              String                     @default("pt-BR")
-  currency            String                     @default("BRL")
-  isActive            Boolean                    @default(true)
-  createdAt           DateTime                   @default(now())
-  updatedAt           DateTime                   @updatedAt
-  memberships         Membership[]
-  sessions            UserSession[]
-  activityEvents      ActivityEvent[]
-  notifications       Notification[]
-  subscription        WorkspaceSubscription?
-  featureOverrides    WorkspaceFeatureOverride[]
-  usageCounters       UsageCounter[]
-  storageFiles        StorageFile[]
-  rolePermissions     RolePermission[]
+  habits                        Habit[]
+  habitSchedules                HabitSchedule[]
+  habitEntries                  HabitEntry[]
+  tasks                         Task[]
+  projects                      Project[]
+  goals                         Goal[]
+  accounts                      Account[]
+  financeCategories             FinanceCategory[]
+  financeTransactions           FinanceTransaction[]
+  budgets                       Budget[]
+  subscriptions                 Subscription[]
+  debts                         Debt[]
+  savingsGoals                  SavingsGoal[]
+  importBatches                 ImportBatch[]
+  importMappings                ImportMapping[]
+  transactionRules              TransactionRule[]
+  investmentAccounts            InvestmentAccount[]
+  investmentAssets              InvestmentAsset[]
+  investmentPositions           InvestmentPosition[]
+  investmentTransactions        InvestmentTransaction[]
+  investmentIncome              InvestmentIncome[]
+  investmentBudgets             InvestmentBudget[]
+  investmentAllocationTargets   InvestmentAllocationTarget[]
+  investmentPortfolioSnapshots  InvestmentPortfolioSnapshot[]
+  investmentBenchmarks          InvestmentBenchmark[]
+  investmentWatchlists          InvestmentWatchlist[]
+  investmentResearchNotes       InvestmentResearchNote[]
+  investmentGoalLinks           InvestmentGoalLink[]
+  investmentTrades              InvestmentTrade[]
+  investmentPriceAlerts         InvestmentPriceAlert[]
+  investmentMonthlyReviews      InvestmentMonthlyReview[]
+  companies                     Company[]
+  applications                  Application[]
+  contacts                      Contact[]
+  interviews                    Interview[]
+  offers                        Offer[]
+  careerDocuments               CareerDocument[]
+  id                            String                        @id @default(cuid())
+  name                          String
+  slug                          String                        @unique
+  timezone                      String                        @default("America/Manaus")
+  locale                        String                        @default("pt-BR")
+  currency                      String                        @default("BRL")
+  isActive                      Boolean                       @default(true)
+  createdAt                     DateTime                      @default(now())
+  updatedAt                     DateTime                      @updatedAt
+  memberships                   Membership[]
+  sessions                      UserSession[]
+  activityEvents                ActivityEvent[]
+  notifications                 Notification[]
+  subscription                  WorkspaceSubscription?
+  featureOverrides              WorkspaceFeatureOverride[]
+  usageCounters                 UsageCounter[]
+  storageFiles                  StorageFile[]
+  rolePermissions               RolePermission[]
+  partnerConnectionsAsRequester PartnerConnection[]           @relation("PartnerConnectionRequester")
+  partnerConnectionsAsReceiver  PartnerConnection[]           @relation("PartnerConnectionReceiver")
+  partnerSharingPolicies        PartnerSharingPolicy[]
 }
 
 model Membership {
@@ -187,6 +215,41 @@ model MemberPermissionOverride {
   permission   Permission       @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@unique([membershipId, permissionId])
+}
+
+model PartnerConnection {
+  id                   String                  @id @default(cuid())
+  requesterWorkspaceId String
+  receiverWorkspaceId  String?
+  requestedByUserId    String
+  acceptedByUserId     String?
+  status               PartnerConnectionStatus @default(PENDING)
+  inviteTokenHash      String?                 @unique
+  inviteExpiresAt      DateTime?
+  createdAt            DateTime                @default(now())
+  acceptedAt           DateTime?
+  revokedAt            DateTime?
+  requesterWorkspace   Workspace               @relation("PartnerConnectionRequester", fields: [requesterWorkspaceId], references: [id], onDelete: Cascade)
+  receiverWorkspace    Workspace?              @relation("PartnerConnectionReceiver", fields: [receiverWorkspaceId], references: [id], onDelete: Cascade)
+  requestedByUser      User                    @relation("PartnerConnectionRequestedBy", fields: [requestedByUserId], references: [id])
+  acceptedByUser       User?                   @relation("PartnerConnectionAcceptedBy", fields: [acceptedByUserId], references: [id])
+  sharingPolicies      PartnerSharingPolicy[]
+
+  @@index([requesterWorkspaceId, status])
+  @@index([receiverWorkspaceId, status])
+}
+
+model PartnerSharingPolicy {
+  id               String            @id @default(cuid())
+  connectionId     String
+  ownerWorkspaceId String
+  module           String
+  enabled          Boolean           @default(true)
+  updatedAt        DateTime          @updatedAt
+  connection       PartnerConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  ownerWorkspace   Workspace         @relation(fields: [ownerWorkspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, ownerWorkspaceId, module])
 }
 
 model SubscriptionPlan {
@@ -445,25 +508,27 @@ enum TransactionType {
 }
 
 model Account {
-  id                   String               @id @default(cuid())
-  workspaceId          String
-  name                 String
-  type                 AccountType          @default(CHECKING)
-  institution          String?
-  currency             String               @default("BRL")
-  initialBalanceCents  Int                  @default(0)
-  creditLimitCents     Int?
-  closingDay           Int?
-  dueDay               Int?
-  isArchived           Boolean              @default(false)
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
-  workspace            Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  transactions         FinanceTransaction[] @relation("OriginAccount")
-  incomingTransactions FinanceTransaction[] @relation("DestinationAccount")
-  subscriptions        Subscription[]
-  savingsGoals         SavingsGoal[]
-  importBatches        ImportBatch[]
+  id                           String                  @id @default(cuid())
+  workspaceId                  String
+  name                         String
+  type                         AccountType             @default(CHECKING)
+  institution                  String?
+  currency                     String                  @default("BRL")
+  initialBalanceCents          Int                     @default(0)
+  creditLimitCents             Int?
+  closingDay                   Int?
+  dueDay                       Int?
+  isArchived                   Boolean                 @default(false)
+  createdAt                    DateTime                @default(now())
+  updatedAt                    DateTime                @updatedAt
+  workspace                    Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  transactions                 FinanceTransaction[]    @relation("OriginAccount")
+  incomingTransactions         FinanceTransaction[]    @relation("DestinationAccount")
+  subscriptions                Subscription[]
+  savingsGoals                 SavingsGoal[]
+  importBatches                ImportBatch[]
+  investmentAccounts           InvestmentAccount[]     @relation("LinkedFinanceAccount")
+  fundedInvestmentTransactions InvestmentTransaction[] @relation("InvestmentFundingAccount")
 
   @@index([workspaceId, isArchived])
 }
@@ -492,36 +557,38 @@ model FinanceCategory {
 }
 
 model FinanceTransaction {
-  id                   String           @id @default(cuid())
-  workspaceId          String
-  accountId            String
-  destinationAccountId String?
-  categoryId           String?
-  type                 TransactionType
-  description          String
-  merchant             String?
-  amountCents          Int
-  currency             String           @default("BRL")
-  date                 DateTime         @db.Date
-  competenceDate       DateTime?        @db.Date
-  installmentNumber    Int?
-  installmentTotal     Int?
-  recurring            Boolean          @default(false)
-  recurringGroupId     String?
-  tags                 String[]         @default([])
-  notes                String?
-  source               String           @default("MANUAL")
-  externalId           String?
-  fingerprint          String?
-  importBatchId        String?
-  revision             Int              @default(0)
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
-  workspace            Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  account              Account          @relation("OriginAccount", fields: [accountId], references: [id])
-  destinationAccount   Account?         @relation("DestinationAccount", fields: [destinationAccountId], references: [id])
-  category             FinanceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  importBatch          ImportBatch?     @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  id                     String                  @id @default(cuid())
+  workspaceId            String
+  accountId              String
+  destinationAccountId   String?
+  categoryId             String?
+  type                   TransactionType
+  description            String
+  merchant               String?
+  amountCents            Int
+  currency               String                  @default("BRL")
+  date                   DateTime                @db.Date
+  competenceDate         DateTime?               @db.Date
+  installmentNumber      Int?
+  installmentTotal       Int?
+  recurring              Boolean                 @default(false)
+  recurringGroupId       String?
+  tags                   String[]                @default([])
+  notes                  String?
+  source                 String                  @default("MANUAL")
+  externalId             String?
+  fingerprint            String?
+  importBatchId          String?
+  revision               Int                     @default(0)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  workspace              Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account                Account                 @relation("OriginAccount", fields: [accountId], references: [id])
+  destinationAccount     Account?                @relation("DestinationAccount", fields: [destinationAccountId], references: [id])
+  category               FinanceCategory?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  importBatch            ImportBatch?            @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  investmentTransactions InvestmentTransaction[] @relation("InvestmentFinanceTransaction")
+  investmentIncomeLinks  InvestmentIncome[]      @relation("InvestmentIncomeFinanceTransaction")
 
   @@unique([workspaceId, fingerprint])
   @@index([workspaceId, date])
@@ -593,19 +660,20 @@ model Debt {
 }
 
 model SavingsGoal {
-  id                 String    @id @default(cuid())
+  id                 String               @id @default(cuid())
   workspaceId        String
   name               String
   targetAmountCents  Int
-  currentAmountCents Int       @default(0)
-  currency           String    @default("BRL")
-  targetDate         DateTime? @db.Date
+  currentAmountCents Int                  @default(0)
+  currency           String               @default("BRL")
+  targetDate         DateTime?            @db.Date
   linkedAccountId    String?
-  status             String    @default("ACTIVE")
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  linkedAccount      Account?  @relation(fields: [linkedAccountId], references: [id], onDelete: SetNull)
+  status             String               @default("ACTIVE")
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  workspace          Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  linkedAccount      Account?             @relation(fields: [linkedAccountId], references: [id], onDelete: SetNull)
+  investmentLinks    InvestmentGoalLink[]
 
   @@index([workspaceId, status])
 }
@@ -670,6 +738,497 @@ model TransactionRule {
   category       FinanceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, isEnabled, priority])
+}
+
+enum InvestmentAccountType {
+  BROKERAGE
+  BANK
+  EXCHANGE
+  WALLET
+  REAL_ESTATE
+  CUSTODY
+  OTHER
+}
+
+enum InvestmentAssetType {
+  CASH_EQUIVALENT
+  SAVINGS
+  CDB
+  LCI
+  LCA
+  TREASURY
+  DEBENTURE
+  FIXED_INCOME_OTHER
+  STOCK
+  ETF
+  BDR
+  FII
+  FIAGRO
+  FUND
+  CRYPTO
+  REAL_ESTATE
+  COMMODITY
+  FOREIGN_ASSET
+  OTHER
+}
+
+enum InvestmentTransactionType {
+  BUY
+  SELL
+  DEPOSIT
+  WITHDRAWAL
+  DIVIDEND
+  INTEREST
+  FEE
+  TAX
+  TRANSFER
+  SPLIT
+  OTHER
+}
+
+enum InvestmentIncomeType {
+  DIVIDEND
+  JCP
+  FII_DISTRIBUTION
+  INTEREST
+  COUPON
+  RENT
+  OTHER
+}
+
+enum InvestmentIndexer {
+  CDI_PERCENTAGE
+  CDI_SPREAD
+  PREFIXED
+  IPCA_SPREAD
+  SELIC
+  CUSTOM
+}
+
+enum InvestmentLiquidity {
+  D0
+  D1
+  DN
+  AT_MATURITY
+  CUSTOM
+  ILLIQUID
+}
+
+enum InvestmentBudgetMode {
+  FIXED_AMOUNT
+  INCOME_PERCENTAGE
+  MANUAL
+  REMAINING_CASH
+}
+
+enum InvestmentTradeDirection {
+  LONG
+  SHORT
+}
+
+enum InvestmentTradeStatus {
+  OPEN
+  CLOSED
+  CANCELED
+}
+
+model InvestmentAccount {
+  id                       String                  @id @default(cuid())
+  workspaceId              String
+  name                     String
+  institution              String?
+  type                     InvestmentAccountType   @default(BROKERAGE)
+  currency                 String                  @default("BRL")
+  linkedFinancialAccountId String?
+  archivedAt               DateTime?
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+  workspace                Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  linkedFinancialAccount   Account?                @relation("LinkedFinanceAccount", fields: [linkedFinancialAccountId], references: [id], onDelete: SetNull)
+  positions                InvestmentPosition[]
+  transactions             InvestmentTransaction[]
+  income                   InvestmentIncome[]
+  trades                   InvestmentTrade[]
+
+  @@index([workspaceId, archivedAt])
+  @@index([workspaceId, institution])
+}
+
+model InvestmentAsset {
+  id                 String                        @id @default(cuid())
+  workspaceId        String
+  name               String
+  ticker             String?
+  exchange           String?
+  currency           String                        @default("BRL")
+  type               InvestmentAssetType
+  sector             String?
+  provider           String?
+  providerAssetId    String?
+  isManual           Boolean                       @default(true)
+  archivedAt         DateTime?
+  createdAt          DateTime                      @default(now())
+  updatedAt          DateTime                      @updatedAt
+  workspace          Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  positions          InvestmentPosition[]
+  transactions       InvestmentTransaction[]
+  income             InvestmentIncome[]
+  prices             InvestmentPrice[]
+  fixedIncomeProfile InvestmentFixedIncomeProfile?
+  realEstateProfile  InvestmentRealEstateProfile?
+  watchlistItems     InvestmentWatchlistItem[]
+  researchNotes      InvestmentResearchNote[]
+  goalLinks          InvestmentGoalLink[]
+  alerts             InvestmentPriceAlert[]
+  trades             InvestmentTrade[]
+
+  @@index([workspaceId, type, archivedAt])
+  @@index([workspaceId, ticker])
+  @@index([provider, providerAssetId])
+}
+
+model InvestmentPosition {
+  id                String            @id @default(cuid())
+  workspaceId       String
+  accountId         String
+  assetId           String
+  quantity          Decimal           @default(0) @db.Decimal(30, 12)
+  bookCostCents     Int               @default(0)
+  averagePriceCents Decimal           @default(0) @db.Decimal(30, 8)
+  currentValueCents Int               @default(0)
+  realizedPnlCents  Int               @default(0)
+  lastValuedAt      DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account           InvestmentAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  asset             InvestmentAsset   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, assetId])
+  @@index([workspaceId, assetId])
+}
+
+model InvestmentTransaction {
+  id                        String                    @id @default(cuid())
+  workspaceId               String
+  accountId                 String
+  assetId                   String?
+  type                      InvestmentTransactionType
+  date                      DateTime                  @db.Date
+  quantity                  Decimal?                  @db.Decimal(30, 12)
+  unitPriceCents            Decimal?                  @db.Decimal(30, 8)
+  grossAmountCents          Int
+  feesCents                 Int                       @default(0)
+  taxesCents                Int                       @default(0)
+  netAmountCents            Int
+  currency                  String                    @default("BRL")
+  source                    String                    @default("MANUAL")
+  externalId                String?
+  importBatchId             String?
+  financeTransactionId      String?                   @unique
+  fundingFinancialAccountId String?
+  notes                     String?
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+  workspace                 Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account                   InvestmentAccount         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  asset                     InvestmentAsset?          @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  financeTransaction        FinanceTransaction?       @relation("InvestmentFinanceTransaction", fields: [financeTransactionId], references: [id], onDelete: SetNull)
+  fundingFinancialAccount   Account?                  @relation("InvestmentFundingAccount", fields: [fundingFinancialAccountId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, externalId])
+  @@index([workspaceId, date])
+  @@index([workspaceId, assetId, date])
+  @@index([workspaceId, accountId, date])
+}
+
+model InvestmentIncome {
+  id                   String               @id @default(cuid())
+  workspaceId          String
+  accountId            String
+  assetId              String?
+  type                 InvestmentIncomeType
+  amountCents          Int
+  currency             String               @default("BRL")
+  paymentDate          DateTime             @db.Date
+  financeTransactionId String?              @unique
+  source               String               @default("MANUAL")
+  notes                String?
+  createdAt            DateTime             @default(now())
+  workspace            Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account              InvestmentAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  asset                InvestmentAsset?     @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  financeTransaction   FinanceTransaction?  @relation("InvestmentIncomeFinanceTransaction", fields: [financeTransactionId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, paymentDate])
+  @@index([workspaceId, assetId, paymentDate])
+}
+
+model InvestmentPrice {
+  id           String          @id @default(cuid())
+  assetId      String
+  priceCents   Decimal         @db.Decimal(30, 8)
+  currency     String
+  provider     String
+  asOf         DateTime
+  retrievedAt  DateTime        @default(now())
+  delayMinutes Int?
+  asset        InvestmentAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, provider, asOf])
+  @@index([assetId, asOf])
+}
+
+model InvestmentProductDefinition {
+  id                           String                         @id @default(cuid())
+  institution                  String
+  product                      String
+  assetType                    InvestmentAssetType
+  indexer                      InvestmentIndexer
+  indexerPercentageBasisPoints Int?
+  spreadBasisPoints            Int?
+  fixedRateBasisPoints         Int?
+  eligibility                  String?
+  eligibleLimitCents           Int?
+  liquidity                    InvestmentLiquidity?
+  validFrom                    DateTime                       @db.Date
+  validUntil                   DateTime?                      @db.Date
+  source                       String
+  lastVerifiedAt               DateTime
+  createdAt                    DateTime                       @default(now())
+  fixedIncomeProfiles          InvestmentFixedIncomeProfile[]
+
+  @@unique([institution, product, validFrom])
+  @@index([institution, product, validUntil])
+}
+
+model InvestmentFixedIncomeProfile {
+  id                           String                       @id @default(cuid())
+  assetId                      String                       @unique
+  productDefinitionId          String?
+  issuer                       String
+  principalCents               Int
+  purchaseDate                 DateTime                     @db.Date
+  maturityDate                 DateTime?                    @db.Date
+  indexer                      InvestmentIndexer
+  indexerPercentageBasisPoints Int?
+  spreadBasisPoints            Int?
+  fixedRateBasisPoints         Int?
+  liquidity                    InvestmentLiquidity
+  liquidityDays                Int?
+  taxTreatment                 String                       @default("REGRESSIVE_IR")
+  guaranteeMetadata            Json                         @default("{}")
+  markToMarket                 Boolean                      @default(false)
+  asset                        InvestmentAsset              @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  productDefinition            InvestmentProductDefinition? @relation(fields: [productDefinitionId], references: [id], onDelete: SetNull)
+
+  @@index([maturityDate])
+}
+
+model InvestmentRealEstateProfile {
+  id                    String          @id @default(cuid())
+  assetId               String          @unique
+  purchasePriceCents    Int
+  purchaseDate          DateTime        @db.Date
+  estimatedValueCents   Int
+  valuationDate         DateTime        @db.Date
+  monthlyRentCents      Int             @default(0)
+  financingBalanceCents Int             @default(0)
+  monthlyCostsCents     Int             @default(0)
+  vacancyBasisPoints    Int             @default(0)
+  propertyType          String          @default("PROPERTY")
+  asset                 InvestmentAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+}
+
+model InvestmentBudget {
+  id                          String               @id @default(cuid())
+  workspaceId                 String
+  month                       String
+  mode                        InvestmentBudgetMode
+  amountCents                 Int
+  incomePercentageBasisPoints Int?
+  reserveCents                Int                  @default(0)
+  plan                        Json                 @default("{}")
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
+  workspace                   Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, month])
+}
+
+model InvestmentAllocationTarget {
+  id                String              @id @default(cuid())
+  workspaceId       String
+  assetType         InvestmentAssetType
+  targetBasisPoints Int
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  workspace         Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, assetType])
+}
+
+model InvestmentPortfolioSnapshot {
+  id                           String    @id @default(cuid())
+  workspaceId                  String
+  date                         DateTime  @db.Date
+  investedCents                Int
+  marketValueCents             Int
+  cumulativeContributionsCents Int
+  cumulativeIncomeCents        Int
+  source                       String    @default("CALCULATED")
+  createdAt                    DateTime  @default(now())
+  workspace                    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, date])
+  @@index([workspaceId, date])
+}
+
+model InvestmentBenchmark {
+  id            String    @id @default(cuid())
+  workspaceId   String
+  code          String
+  value         Decimal   @db.Decimal(24, 10)
+  referenceDate DateTime  @db.Date
+  source        String
+  retrievedAt   DateTime
+  metadata      Json      @default("{}")
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, code, referenceDate])
+  @@index([workspaceId, code, referenceDate])
+}
+
+model InvestmentWatchlist {
+  id          String                    @id @default(cuid())
+  workspaceId String
+  name        String
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+  workspace   Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  items       InvestmentWatchlistItem[]
+
+  @@unique([workspaceId, name])
+}
+
+model InvestmentWatchlistItem {
+  id               String              @id @default(cuid())
+  watchlistId      String
+  assetId          String
+  targetPriceCents Decimal?            @db.Decimal(30, 8)
+  notes            String?
+  addedAt          DateTime            @default(now())
+  watchlist        InvestmentWatchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  asset            InvestmentAsset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([watchlistId, assetId])
+}
+
+model InvestmentResearchNote {
+  id          String           @id @default(cuid())
+  workspaceId String
+  assetId     String?
+  title       String
+  content     String
+  tags        String[]         @default([])
+  sources     Json             @default("[]")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  workspace   Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  asset       InvestmentAsset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, updatedAt])
+  @@index([workspaceId, assetId])
+}
+
+model InvestmentMarketSnapshot {
+  id          String   @id @default(cuid())
+  key         String
+  provider    String
+  payload     Json
+  asOf        DateTime
+  retrievedAt DateTime @default(now())
+  expiresAt   DateTime
+  status      String   @default("FRESH")
+
+  @@unique([key, provider])
+  @@index([expiresAt])
+}
+
+model InvestmentGoalLink {
+  id                    String           @id @default(cuid())
+  workspaceId           String
+  savingsGoalId         String
+  assetId               String?
+  allocationBasisPoints Int              @default(10000)
+  workspace             Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  savingsGoal           SavingsGoal      @relation(fields: [savingsGoalId], references: [id], onDelete: Cascade)
+  asset                 InvestmentAsset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  @@unique([savingsGoalId, assetId])
+  @@index([workspaceId, savingsGoalId])
+}
+
+model InvestmentTrade {
+  id               String                   @id @default(cuid())
+  workspaceId      String
+  accountId        String
+  assetId          String
+  direction        InvestmentTradeDirection
+  entryDate        DateTime
+  entryPriceCents  Decimal                  @db.Decimal(30, 8)
+  exitDate         DateTime?
+  exitPriceCents   Decimal?                 @db.Decimal(30, 8)
+  quantity         Decimal                  @db.Decimal(30, 12)
+  feesCents        Int                      @default(0)
+  taxesCents       Int                      @default(0)
+  stopPriceCents   Decimal?                 @db.Decimal(30, 8)
+  targetPriceCents Decimal?                 @db.Decimal(30, 8)
+  strategy         String?
+  setup            String?
+  notes            String?
+  attachmentUrls   String[]                 @default([])
+  status           InvestmentTradeStatus    @default(OPEN)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  workspace        Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account          InvestmentAccount        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  asset            InvestmentAsset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, entryDate])
+  @@index([workspaceId, status])
+  @@index([assetId, entryDate])
+}
+
+model InvestmentPriceAlert {
+  id              String          @id @default(cuid())
+  workspaceId     String
+  assetId         String
+  type            String
+  targetValue     Decimal         @db.Decimal(30, 8)
+  enabled         Boolean         @default(true)
+  lastTriggeredAt DateTime?
+  createdAt       DateTime        @default(now())
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  asset           InvestmentAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, enabled])
+}
+
+model InvestmentMonthlyReview {
+  id                    String    @id @default(cuid())
+  workspaceId           String
+  month                 String
+  portfolioUpdated      Boolean   @default(false)
+  contributionsReviewed Boolean   @default(false)
+  allocationReviewed    Boolean   @default(false)
+  maturitiesReviewed    Boolean   @default(false)
+  goalsReviewed         Boolean   @default(false)
+  completedAt           DateTime?
+  updatedAt             DateTime  @updatedAt
+  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, month])
 }
 
 enum ApplicationStatus {
