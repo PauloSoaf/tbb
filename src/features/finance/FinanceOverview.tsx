@@ -60,16 +60,19 @@ export function FinanceOverview({ data, captureAccounts }: { data: FinanceOvervi
     { label: t("expenses"), value: metrics.expensesCents, context: metrics.incomeReferenceCents ? `${incomeUse}% ${t("spentFromIncome")}` : t("registeredThisMonth"), icon: ArrowUpRight, tone: "danger" },
     { label: t("balance"), value: metrics.balanceCents, context: balanceDelta === null ? t("newThisMonth") : `${balanceDelta > 0 ? "+" : ""}${balanceDelta}% ${t("comparedPrevious")}`, icon: metrics.balanceCents >= 0 ? TrendingUp : TrendingDown, tone: metrics.balanceCents >= 0 ? "success" : "danger" },
     { label: t("fixed"), value: metrics.fixedCents, context: `${data.fixedDetails.recurringCount + data.fixedDetails.subscriptionCount} ${t("monthlyCommitments")}`, icon: Repeat2, tone: "warning" },
-    { label: t("invoices"), value: metrics.openInvoicesCents, context: `${data.creditCards.length} ${t("dueOnCards")}`, icon: CreditCard, tone: "purple" },
+    { label: t("invoices"), value: metrics.openInvoicesCents, context: data.cardStatements.openCount ? `${data.cardStatements.openCount} ${t("openStatementsDue")} ${data.cardStatements.dueDates.map(date).join(" · ")}` : `${data.creditCards.length} ${t("dueOnCards")}`, icon: CreditCard, tone: "purple" },
   ];
+  const month = (key: string) => new Intl.DateTimeFormat(language, { month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${key}-01T00:00:00.000Z`));
 
   const alerts: { id: string; title: string; detail: string; href: string; tone: "warning" | "danger" }[] = [];
+  for (const item of data.cardStatements.overdue.slice(0, 2)) alerts.push({ id: `overdue-${item.id}`, title: `${t("overdueStatement")} · ${item.accountName}`, detail: `${date(item.dueDate)} · ${currency(item.amountCents)}`, href: "/finance/statements", tone: "danger" });
   if (!metrics.incomeReferenceCents && metrics.expensesCents) alerts.push({ id: "income", title: t("setIncome"), detail: currency(metrics.expensesCents), href: "#renda", tone: "warning" });
   else if (metrics.incomeReferenceCents && metrics.expensesCents >= metrics.incomeReferenceCents) alerts.push({ id: "over", title: t("overIncome"), detail: `${incomeUse}% · ${currency(metrics.expensesCents)}`, href: "#captura", tone: "danger" });
   else if (metrics.incomeReferenceCents && incomeUse >= 80) alerts.push({ id: "near", title: t("nearIncome"), detail: `${incomeUse}% · ${currency(metrics.availableCents)}`, href: "#analises", tone: "warning" });
   else if (metrics.incomeReferenceCents && projection > metrics.incomeReferenceCents) alerts.push({ id: "pace", title: t("spendingPace"), detail: currency(projection), href: "#analises", tone: "warning" });
   for (const card of data.creditCards.filter((item) => item.usage !== null && item.usage >= 80).slice(0, 2)) alerts.push({ id: `card-${card.id}`, title: `${t("cardLimit")} · ${card.name}`, detail: `${card.usage}% · ${currency(card.monthSpentCents)}`, href: "#cartoes", tone: (card.usage || 0) >= 100 ? "danger" : "warning" });
   for (const budget of data.budgets.filter((item) => item.usage >= 80).slice(0, 2)) alerts.push({ id: `budget-${budget.id}`, title: `${t("budgetAlert")} · ${budget.category}`, detail: `${budget.usage}% · ${currency(budget.spentCents)} / ${currency(budget.limitCents)}`, href: "/finance/budgets", tone: budget.usage >= 100 ? "danger" : "warning" });
+  for (const item of data.cardStatements.pending.slice(0, 1)) alerts.push({ id: `pending-${item.id}`, title: `${t("pendingReconciliation")} · ${item.accountName}`, detail: `${month(item.referenceMonth)} · ${currency(item.amountCents)} · ${t("notSummed")}`, href: "/finance/statements", tone: "warning" });
   for (const item of data.upcoming.slice(0, 2)) alerts.push({ id: item.id, title: `${item.label} ${t("dueSoon")}`, detail: `${date(item.date)} · ${currency(item.amountCents)}`, href: "#pagamentos", tone: "warning" });
 
   return <div className="finance-overview-page">
@@ -81,7 +84,7 @@ export function FinanceOverview({ data, captureAccounts }: { data: FinanceOvervi
         {kpis.map((item, index) => <RevealOnScroll key={item.label} delay={index * .035} className="finance-kpi-reveal">
           <article className="finance-kpi" data-tone={item.tone}>
             <span className="finance-kpi-icon"><item.icon size={16}/></span>
-            <div><small>{item.label}</small><strong><NumberFlow value={item.value / 100} format={{ style: "currency", currency: "BRL", maximumFractionDigits: 0 }} locales={language}/></strong><span>{item.context}</span></div>
+            <div><small>{item.label}</small><strong><NumberFlow value={item.value / 100} format={{ style: "currency", currency: "BRL", maximumFractionDigits: item.value % 100 ? 2 : 0 }} locales={language}/></strong><span>{item.context}</span></div>
           </article>
         </RevealOnScroll>)}
       </section>
@@ -130,8 +133,10 @@ export function FinanceOverview({ data, captureAccounts }: { data: FinanceOvervi
           <div className="finance-account-list">{data.accounts.filter((account) => !account.unassigned && account.type !== "CREDIT_CARD").slice(0, 6).map((account) => <Link href="/finance/accounts" key={account.id}><span className="finance-account-mark"><WalletCards size={16}/></span><span><strong>{account.name}</strong><small>{account.institution || account.type.replaceAll("_", " ")}</small></span><b data-negative={account.balanceCents < 0 || undefined}>{currency(account.balanceCents)}</b></Link>)}{data.accounts.some((account) => account.unassigned) && <Link href="/finance/transactions"><span className="finance-account-mark tone-warning"><AlertTriangle size={16}/></span><span><strong>{t("pendingLink")}</strong><small>{t("transactions")}</small></span><ArrowRight size={15}/></Link>}</div>
         </article></RevealOnScroll>
         <RevealOnScroll delay={.05}><article id="cartoes" className="finance-overview-card finance-card-overview">
-          <header className="finance-card-heading"><div><span className="finance-card-icon tone-purple"><CreditCard size={17}/></span><div><h2>{t("cards")}</h2><p>{t("cardsHint")}</p></div></div></header>
-          {data.creditCards.length ? <div className="finance-credit-list">{data.creditCards.slice(0, 4).map((card) => <Link href="/finance/accounts" key={card.id}><div><span><strong>{card.name}</strong><b>{currency(card.monthSpentCents)}</b></span><small>{card.usage === null ? t("limitMissing") : `${card.usage}% ${t("used")}`} {card.closingDay ? `· ${t("closesDay")} ${card.closingDay}` : ""} {card.dueDay ? `· ${t("dueDay")} ${card.dueDay}` : ""}</small></div><span className="finance-credit-progress" data-danger={(card.usage || 0) >= 90 || undefined}><i style={{ width: `${Math.min(100, card.usage || 0)}%` }}/></span></Link>)}</div> : <EmptyDashboard icon={CreditCard} text={t("noCards")} href="/finance/accounts" linkText={t("addCard")}/>}
+          <header className="finance-card-heading"><div><span className="finance-card-icon tone-purple"><CreditCard size={17}/></span><div><h2>{t("cards")}</h2><p>{t("cardsHint")}</p></div></div>{data.creditCards.some((card) => card.statement) && <Link href="/finance/statements">{t("seeStatements")}<ArrowRight size={14}/></Link>}</header>
+          {data.creditCards.length ? <div className="finance-credit-list">{data.creditCards.slice(0, 4).map((card) => <Link href={card.statement ? "/finance/statements" : "/finance/accounts"} key={card.id}><div><span><strong>{card.name}</strong><b>{currency(card.invoiceCents)}</b></span><small>{card.statement
+            ? card.statement.nextDueDate ? `${card.statement.overdue ? `${t("overdueStatement")} · ` : ""}${t("statementDue")} ${date(card.statement.nextDueDate)}${card.statement.closingDate ? ` · ${t("statementCloses")} ${date(card.statement.closingDate)}` : card.statement.closingDay ? ` · ${t("closesDay")} ${card.statement.closingDay}` : ""}` : t("noOpenStatement")
+            : <>{card.usage === null ? t("limitMissing") : `${card.usage}% ${t("used")}`} {card.closingDay ? `· ${t("closesDay")} ${card.closingDay}` : ""} {card.dueDay ? `· ${t("dueDay")} ${card.dueDay}` : ""}</>}</small></div><span className="finance-credit-progress" data-danger={(card.usage || 0) >= 90 || card.statement?.overdue || undefined}><i style={{ width: `${Math.min(100, card.usage || 0)}%` }}/></span></Link>)}</div> : <EmptyDashboard icon={CreditCard} text={t("noCards")} href="/finance/accounts" linkText={t("addCard")}/>}
         </article></RevealOnScroll>
       </section>
 

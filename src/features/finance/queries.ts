@@ -2,6 +2,22 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { addDays, dateKeyToUTC, startOfMonth } from "@/lib/dates";
 import { isUnassignedAccount } from "@/features/finance/unassigned-account";
+import { summarizeCardStatements, type StatementRow } from "@/features/finance/card-statements";
+
+const dayOf = (value: Date | null) => (value ? value.toISOString().slice(0, 10) : null);
+
+/** Owner-scope only: partner and together views never load card statements. */
+export async function cardStatementRows(workspaceId: string): Promise<StatementRow[]> {
+  const rows = await prisma.cardStatement.findMany({
+    where: { workspaceId },
+    select: { id: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, closingDate: true, closingDay: true, referenceMonth: true, paidAt: true, reconciliation: true, overlapsStatementId: true, notes: true, account: { select: { name: true } } },
+  });
+  return rows.map(({ account, ...row }) => ({ ...row, accountName: account.name, dueDate: dayOf(row.dueDate), closingDate: dayOf(row.closingDate), paidAt: dayOf(row.paidAt) }));
+}
+
+export async function cardStatementOverview(workspaceId: string, today: string) {
+  return summarizeCardStatements(await cardStatementRows(workspaceId), today);
+}
 
 export async function financeSummary(workspaceId: string, today: string) {
   const monthStart=dateKeyToUTC(startOfMonth(today)); const tomorrow=dateKeyToUTC(addDays(today,1));

@@ -1,12 +1,15 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { dayKey } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
-import { requirePermission } from "@/lib/tenancy/requirePermission";
+import { AuthorizationError, requirePermission } from "@/lib/tenancy/requirePermission";
 import { dateOnly, parseMoney } from "./money";
 import { CsvFinanceImportParser, previewCsv, transactionFingerprint, type ImportPreviewRow } from "./import-engine";
+import { applyCardStatementImport, previewCardStatementImport } from "./card-statement-import";
 import { ensureUnassignedAccount } from "./unassigned-account";
 
 const text = (fd: FormData, key: string) => String(fd.get(key) || "").trim();
@@ -364,6 +367,57 @@ export async function cancelImport(fd: FormData) {
   const ctx = await requirePermission("WRITE");
   try { await prisma.importBatch.updateMany({ where: { id: text(fd, "batchId"), workspaceId: ctx.workspaceId, status: { in: ["UPLOADED", "PREVIEW"] } }, data: { status: "CANCELED", rawContent: null, preview: Prisma.DbNull } }); invalidate(); return { success: "Importação cancelada." }; }
   catch (error) { return failure(error); }
+}
+
+// Card statements are personal data: the workspace comes only from the session and only
+// its owner may import or reconcile them. The uploaded file itself is never stored.
+async function statementOwner() {
+  const ctx = await requirePermission("WRITE");
+  if (ctx.role !== "OWNER") throw new AuthorizationError("Somente o titular deste espaço pode gerenciar faturas de cartão.");
+  return ctx;
+}
+async function statementFile(fd: FormData) {
+  const file = fd.get("file");
+  if (!(file instanceof File) || !file.size || file.size > 1_000_000) throw new Error("Selecione um arquivo JSON de até 1 MB.");
+  if (!file.name.toLowerCase().endsWith(".json")) throw new Error("Formato aceito: JSON.");
+  const content = await file.text();
+  try { return { raw: JSON.parse(content.replace(/^﻿/, "")) as unknown, sha256: createHash("sha256").update(content).digest("hex") }; }
+  catch { throw new Error("O arquivo não contém um JSON válido."); }
+}
+
+export async function previewCardStatements(fd: FormData) {
+  try {
+    const ctx = await statementOwner();
+    const { raw } = await statementFile(fd);
+    return { report: await previewCardStatementImport(prisma, ctx.workspaceId, raw, dayKey(new Date(), ctx.workspace.timezone)) };
+  } catch (error) { return failure(error); }
+}
+
+export async function confirmCardStatements(fd: FormData) {
+  try {
+    const ctx = await statementOwner();
+    const { raw, sha256 } = await statementFile(fd);
+    const result = await prisma.$transaction(tx => applyCardStatementImport(tx, ctx, raw, { fingerprint: text(fd, "fingerprint"), acceptConflicts: fd.get("acceptConflicts") === "on", fileSha256: sha256 }),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30000 });
+    invalidate();
+    const { create, update, keep, conflict } = result.counts;
+    return { success: `${create} criada(s), ${update} atualizada(s), ${keep} mantida(s)${conflict ? `, ${conflict} em conflito preservada(s)` : ""}.`, ...result };
+  } catch (error) { return failure(error); }
+}
+
+export async function resolveCardStatementOverlap(fd: FormData) {
+  try {
+    const ctx = await statementOwner();
+    const id = text(fd, "id");
+    const resolution = z.enum(["INCLUDED_IN_STATEMENT", "SEPARATE_CHARGE"]).parse(text(fd, "resolution"));
+    await prisma.$transaction(async tx => {
+      const result = await tx.cardStatement.updateMany({ where: { id, workspaceId: ctx.workspaceId, reconciliation: "PENDING" }, data: { reconciliation: resolution } });
+      if (!result.count) throw new Error("Previsão não encontrada ou já conciliada.");
+      await log(tx, ctx, "finance.card_statement_reconciled", "CardStatement", id, { resolution });
+    });
+    invalidate();
+    return { success: resolution === "SEPARATE_CHARGE" ? "Previsão marcada como cobrança separada." : "Previsão marcada como já incluída na fatura." };
+  } catch (error) { return failure(error); }
 }
 
 const gridTransactionSchema = z.object({

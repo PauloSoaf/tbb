@@ -39,7 +39,64 @@ model Account {
   importBatches ImportBatch[]
   investmentAccounts InvestmentAccount[] @relation("LinkedFinanceAccount")
   fundedInvestmentTransactions InvestmentTransaction[] @relation("InvestmentFundingAccount")
+  cardStatements CardStatement[]
+  @@unique([id, workspaceId])
   @@index([workspaceId, isArchived])
+}
+
+enum CardStatementKind {
+  STATEMENT
+  MONTHLY_PROJECTION
+}
+
+enum CardStatementStatus {
+  PAID
+  OPEN
+  FUTURE_KNOWN
+  FORECAST
+}
+
+enum CardStatementReconciliation {
+  NOT_REQUIRED
+  PENDING
+  INCLUDED_IN_STATEMENT
+  SEPARATE_CHARGE
+}
+
+// Aggregated card statement or monthly projection. It lives beside the ledger and
+// never creates FinanceTransaction rows, so card purchases are not counted twice.
+// Null dates mean "not provided by the source", never inferred.
+model CardStatement {
+  id String @id @default(cuid())
+  workspaceId String
+  accountId String
+  kind CardStatementKind
+  status CardStatementStatus
+  periodKey String
+  externalKey String
+  amountCents Int
+  currency String @default("BRL")
+  dueDate DateTime? @db.Date
+  closingDate DateTime? @db.Date
+  closingDay Int?
+  referenceMonth String?
+  paidAt DateTime? @db.Date
+  reconciliation CardStatementReconciliation @default(NOT_REQUIRED)
+  overlapsStatementId String?
+  sourceRecordType String
+  sourceAsOf DateTime @db.Date
+  source String @default("MANUAL_IMPORT")
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId, workspaceId], references: [id, workspaceId])
+  overlapsStatement CardStatement? @relation("CardStatementOverlap", fields: [overlapsStatementId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  overlappedBy CardStatement[] @relation("CardStatementOverlap")
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, externalKey])
+  @@unique([workspaceId, accountId, periodKey])
+  @@index([workspaceId, status, dueDate])
 }
 
 model FinanceCategory {

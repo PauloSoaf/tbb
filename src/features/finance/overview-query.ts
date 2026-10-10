@@ -1,7 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { addDays, dateKeyToUTC, startOfMonth } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
+import { summarizeCardStatements, type StatementRow } from "./card-statements";
 import { calculateFixedExpenses } from "./fixed-expenses";
+import { cardStatementRows } from "./queries";
 import { isUnassignedAccount } from "./unassigned-account";
 
 export type FinanceOverviewData = Awaited<ReturnType<typeof financeOverview>>;
@@ -38,7 +40,9 @@ function nextSubscriptionDate(initial: Date, cycle: string, customDays: number |
   return value;
 }
 
-export async function financeOverview(workspaceId: string, today: string) {
+// Card statements are private to their owner, so partner and together scopes call this
+// without `cardStatements` and never read them.
+export async function financeOverview(workspaceId: string, today: string, options: { cardStatements?: boolean } = {}) {
   const todayDate = dateKeyToUTC(today);
   const tomorrow = dateKeyToUTC(addDays(today, 1));
   const monthStart = dateKeyToUTC(startOfMonth(today));
@@ -65,6 +69,7 @@ export async function financeOverview(workspaceId: string, today: string) {
     budgets,
     investmentPositions,
     investmentMaturities,
+    statementRows,
   ] = await Promise.all([
     prisma.account.findMany({
       where: { workspaceId, isArchived: false },
@@ -161,7 +166,9 @@ export async function financeOverview(workspaceId: string, today: string) {
       orderBy: { maturityDate: "asc" },
       take: 5,
     }),
+    options.cardStatements ? cardStatementRows(workspaceId) : Promise.resolve<StatementRow[]>([]),
   ]);
+  const statements = summarizeCardStatements(statementRows, today);
 
   const categoryById = new Map(categoryNames.map((category) => [category.id, category.name]));
   const previousCategoryAmounts = new Map(previousCategories.map((category) => [category.categoryId, category._sum.amountCents || 0]));
@@ -215,7 +222,10 @@ export async function financeOverview(workspaceId: string, today: string) {
       .reduce((sum, movement) => sum + (movement.type === "EXPENSE" ? movement._sum.amountCents || 0 : -(movement._sum.amountCents || 0)), 0));
     const limitCents = account.creditLimitCents || 0;
     const due = nextDueDate(today, account.dueDay);
-    return { id: account.id, name: account.name, institution: account.institution, spentCents, monthSpentCents, limitCents, availableCents: Math.max(0, limitCents - monthSpentCents), usage: limitCents ? Math.round(monthSpentCents / limitCents * 100) : null, closingDay: account.closingDay, dueDay: account.dueDay, nextDueDate: due?.toISOString().slice(0, 10) || null };
+    // A card with registered statements is billed by them; its ledger spending is not added again.
+    const statement = statements.byAccount[account.id];
+    return { id: account.id, name: account.name, institution: account.institution, spentCents, monthSpentCents, limitCents, availableCents: Math.max(0, limitCents - monthSpentCents), usage: limitCents ? Math.round(monthSpentCents / limitCents * 100) : null, closingDay: account.closingDay, dueDay: account.dueDay, nextDueDate: due?.toISOString().slice(0, 10) || null,
+      invoiceCents: statement ? statement.openCents : monthSpentCents, invoiceSource: statement ? "STATEMENT" as const : "LEDGER" as const, statement: statement || null };
   });
 
   const upcoming = [
@@ -230,7 +240,8 @@ export async function financeOverview(workspaceId: string, today: string) {
       const due = nextDueDate(today, item.dueDay);
       return due ? [{ id: `debt-${item.id}`, label: item.name, kind: "DEBT" as const, amountCents: item.minimumPaymentCents, date: due }] : [];
     }),
-    ...creditCards.flatMap((item) => item.nextDueDate && item.monthSpentCents > 0 ? [{ id: `card-${item.id}`, label: item.name, kind: "CARD" as const, amountCents: item.monthSpentCents, date: dateKeyToUTC(item.nextDueDate) }] : []),
+    ...creditCards.flatMap((item) => item.invoiceSource === "LEDGER" && item.nextDueDate && item.monthSpentCents > 0 ? [{ id: `card-${item.id}`, label: item.name, kind: "CARD" as const, amountCents: item.monthSpentCents, date: dateKeyToUTC(item.nextDueDate) }] : []),
+    ...statements.open.map((item) => ({ id: `statement-${item.id}`, label: item.accountName, kind: "CARD" as const, amountCents: item.amountCents, date: dateKeyToUTC(item.dueDate!) })),
     ...investmentMaturities.flatMap((item) => item.maturityDate ? [{ id: `investment-${item.asset.id}`, label: item.asset.ticker || item.asset.name, kind: "INVESTMENT" as const, amountCents: item.principalCents, date: item.maturityDate }] : []),
   ].filter((item) => item.date >= todayDate && item.date <= sevenDays)
     .sort((a, b) => a.date.getTime() - b.date.getTime())
@@ -258,7 +269,7 @@ export async function financeOverview(workspaceId: string, today: string) {
       balanceCents: current.balanceCents,
       previousBalanceCents: previous.balanceCents,
       fixedCents: fixed.amountCents,
-      openInvoicesCents: creditCards.reduce((sum, card) => sum + card.monthSpentCents, 0),
+      openInvoicesCents: creditCards.reduce((sum, card) => sum + card.invoiceCents, 0),
       incomeReferenceCents,
       fixedPaidCents,
       variableCents: Math.max(0, current.expensesCents - fixedPaidCents),
@@ -279,6 +290,12 @@ export async function financeOverview(workspaceId: string, today: string) {
     }),
     accounts: accountRows.map(({ id, name, institution, type, balanceCents, unassigned }) => ({ id, name, institution, type, balanceCents, unassigned })),
     creditCards,
+    cardStatements: {
+      openCount: statements.open.length,
+      dueDates: statements.dueDates,
+      overdue: statements.open.filter((item) => item.overdue).map(({ id, accountName, amountCents, dueDate }) => ({ id, accountName, amountCents, dueDate: dueDate! })),
+      pending: statements.pending.map(({ id, accountName, amountCents, referenceMonth }) => ({ id, accountName, amountCents, referenceMonth: referenceMonth! })),
+    },
     upcoming,
     savingsGoals,
     recent: recent.map((item) => ({ id: item.id, type: item.type, description: item.description, merchant: item.merchant, amountCents: item.amountCents, date: item.date.toISOString().slice(0, 10), source: item.source, account: item.account.name, category: item.category?.name || "Sem categoria" })),
