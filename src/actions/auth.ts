@@ -7,6 +7,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { authFailureMessage } from "@/lib/auth/failure";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { createSession, SESSION_MAX_AGE } from "@/lib/auth/session";
 import { COOKIE_NAME, createSessionCookie, createLogoutCookie, hashSessionToken } from "@/lib/auth/cookies";
@@ -58,8 +59,8 @@ export async function loginAction(_previous: AuthState, formData: FormData): Pro
         type: "session.login", entityType: "user", entityId: user.id, source: "SYSTEM" } });
       return session;
     });
-  } catch {
-    return { error: "Não foi possível entrar agora. Tente novamente em instantes." };
+  } catch (error) {
+    return { error: authFailureMessage("login", error, "Não foi possível entrar agora. Tente novamente em instantes.") };
   }
   (await cookies()).set(createSessionCookie(token));
   redirect("/today");
@@ -88,7 +89,7 @@ export async function registerAction(_previous: AuthState, formData: FormData): 
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return { error: "Não foi possível criar a conta com este e-mail. Se já tem uma conta, entre." };
     }
-    return { error: "Não foi possível criar sua conta agora. Tente novamente em instantes." };
+    return { error: authFailureMessage("register", error, "Não foi possível criar sua conta agora. Tente novamente em instantes.") };
   }
   (await cookies()).set(createSessionCookie(token));
   redirect("/today");
