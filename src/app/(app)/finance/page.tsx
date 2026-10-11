@@ -43,7 +43,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
     </div>;
   }
 
-  const overview = await financeOverview(context.workspaceId, today, { cardStatements: true });
+  const overview = await financeOverview(context.workspaceId, today, { statementViewer: context });
   const captureAccounts = overview.accounts.filter((account) => !account.unassigned).map(({ id, name, institution, type }) => ({ id, name, institution, type }));
   return <FinanceOverview data={overview} captureAccounts={captureAccounts}/>;
 }

@@ -1,29 +1,96 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type MembershipRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { addDays, dateKeyToUTC, startOfMonth } from "@/lib/dates";
 import { isUnassignedAccount } from "@/features/finance/unassigned-account";
 import { summarizeCardStatements, type StatementRow } from "@/features/finance/card-statements";
+import { calculateCreditCardLimitBreakdown, cardLimitInput, type CardLedger } from "@/features/finance/credit-limit";
 
 const dayOf = (value: Date | null) => (value ? value.toISOString().slice(0, 10) : null);
 
-/** Owner-scope only: partner and together views never load card statements. */
-export async function cardStatementRows(workspaceId: string): Promise<StatementRow[]> {
-  const rows = await prisma.cardStatement.findMany({
-    where: { workspaceId },
-    select: { id: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, closingDate: true, closingDay: true, referenceMonth: true, paidAt: true, reconciliation: true, overlapsStatementId: true, notes: true, account: { select: { name: true } } },
+/** Card statements are personal: only the owner of the session's workspace reads them. Callers
+ * pass the session context rather than a bare workspace id, so no page can skip this check, and
+ * partner or together views never reach it with the partner's workspace. */
+export type StatementViewer = { workspaceId: string; role: MembershipRole };
+export const canReadCardStatements = (viewer: StatementViewer) => viewer.role === "OWNER";
+
+/** Bills of the viewer's workspace. `amountCents` is the bill total: the declared amount plus the
+ * card expenses added on top of it; already-included expenses only count as detail. */
+export async function cardStatementRows(viewer: StatementViewer): Promise<StatementRow[]> {
+  if (!canReadCardStatements(viewer)) return [];
+  const [rows, linked] = await Promise.all([
+    prisma.cardStatement.findMany({
+      where: { workspaceId: viewer.workspaceId },
+      select: { id: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, closingDate: true, closingDay: true, referenceMonth: true, paidAt: true, reconciliation: true, overlapsStatementId: true, notes: true, account: { select: { name: true } } },
+    }),
+    prisma.financeTransaction.findMany({
+      where: { workspaceId: viewer.workspaceId, cardStatementId: { not: null }, type: "EXPENSE" },
+      select: { cardStatementId: true, statementDetailMode: true, amountCents: true },
+    }),
+  ]);
+  const detail = new Map<string, { addedCents: number; detailedCents: number; detailCount: number }>();
+  for (const item of linked) {
+    const current = detail.get(item.cardStatementId!) ?? { addedCents: 0, detailedCents: 0, detailCount: 0 };
+    current.detailedCents += item.amountCents;
+    current.detailCount += 1;
+    if (item.statementDetailMode === "ADDED_TO_STATEMENT") current.addedCents += item.amountCents;
+    detail.set(item.cardStatementId!, current);
+  }
+  return rows.map(({ account, ...row }) => {
+    const extra = detail.get(row.id) ?? { addedCents: 0, detailedCents: 0, detailCount: 0 };
+    return {
+      ...row, ...extra, accountName: account.name, dueDate: dayOf(row.dueDate), closingDate: dayOf(row.closingDate), paidAt: dayOf(row.paidAt),
+      amountCents: row.amountCents + extra.addedCents, declaredCents: row.amountCents,
+    };
   });
-  return rows.map(({ account, ...row }) => ({ ...row, accountName: account.name, dueDate: dayOf(row.dueDate), closingDate: dayOf(row.closingDate), paidAt: dayOf(row.paidAt) }));
 }
 
-export async function cardStatementOverview(workspaceId: string, today: string) {
-  return summarizeCardStatements(await cardStatementRows(workspaceId), today);
+export async function cardStatementOverview(viewer: StatementViewer, today: string) {
+  return summarizeCardStatements(await cardStatementRows(viewer), today);
 }
+
+/** Every active credit card with its limit breakdown, computed once for all screens. Pass rows from
+ * `cardStatementRows`: a viewer who cannot read statements gets the ledger-only view. */
+export async function creditCardPositions(workspaceId: string, today: string, statementRows: StatementRow[]) {
+  const onCards = { workspaceId, source: { not: "QUICK_INCOME" }, account: { type: "CREDIT_CARD" as const, isArchived: false } };
+  const [cards, origin, incoming, future, unlinked] = await Promise.all([
+    prisma.account.findMany({
+      where: { workspaceId, type: "CREDIT_CARD", isArchived: false },
+      select: { id: true, name: true, institution: true, creditLimitCents: true, closingDay: true, dueDay: true, initialBalanceCents: true },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.financeTransaction.groupBy({ by: ["accountId", "type"], where: onCards, _sum: { amountCents: true } }),
+    prisma.financeTransaction.groupBy({ by: ["destinationAccountId"], where: { workspaceId, type: "TRANSFER", destinationAccount: { type: "CREDIT_CARD", isArchived: false } }, _sum: { amountCents: true } }),
+    prisma.financeTransaction.groupBy({ by: ["accountId", "type"], where: { ...onCards, type: { in: ["EXPENSE", "REFUND"] }, date: { gte: dateKeyToUTC(addDays(today, 1)) } }, _sum: { amountCents: true } }),
+    prisma.financeTransaction.findMany({
+      where: { ...onCards, cardStatementId: null, type: { in: ["EXPENSE", "REFUND"] }, date: { gte: dateKeyToUTC(addDays(today, -400)) } },
+      select: { accountId: true, type: true, amountCents: true, date: true },
+    }),
+  ]);
+  const summary = summarizeCardStatements(statementRows, today);
+  const credit = (type: string) => type === "INCOME" || type === "REFUND" || type === "ADJUSTMENT";
+  return cards.map((account) => {
+    const ledger: CardLedger = {
+      balanceCents: account.initialBalanceCents
+        + origin.filter((row) => row.accountId === account.id).reduce((sum, row) => sum + (credit(row.type) ? 1 : -1) * (row._sum.amountCents || 0), 0)
+        + (incoming.find((row) => row.destinationAccountId === account.id)?._sum.amountCents || 0),
+      futureNetCents: future.filter((row) => row.accountId === account.id).reduce((sum, row) => sum + (row.type === "EXPENSE" ? 1 : -1) * (row._sum.amountCents || 0), 0),
+      unlinked: unlinked.filter((row) => row.accountId === account.id).map((row) => ({ date: row.date.toISOString().slice(0, 10), type: row.type as "EXPENSE" | "REFUND", amountCents: row.amountCents })),
+    };
+    const statements = statementRows.filter((row) => row.accountId === account.id);
+    const totals = summary.byAccount[account.id];
+    return {
+      ...account, statements, totals: totals ?? null,
+      breakdown: calculateCreditCardLimitBreakdown(cardLimitInput({ limitCents: account.creditLimitCents, today, statements, totals, ledger })),
+    };
+  });
+}
+export type CreditCardPosition = Awaited<ReturnType<typeof creditCardPositions>>[number];
 
 export async function financeSummary(workspaceId: string, today: string) {
   const monthStart=dateKeyToUTC(startOfMonth(today)); const tomorrow=dateKeyToUTC(addDays(today,1));
   const [accounts, month, subscriptions, debts, savings, monthlyIncome] = await Promise.all([
-    prisma.account.findMany({where:{workspaceId,isArchived:false},include:{transactions:{select:{type:true,amountCents:true}},incomingTransactions:{select:{amountCents:true}}},orderBy:{createdAt:"asc"}}),
-    prisma.financeTransaction.groupBy({by:["type"],where:{workspaceId,date:{gte:monthStart,lt:tomorrow}},_sum:{amountCents:true}}),
+    prisma.account.findMany({where:{workspaceId,isArchived:false},include:{transactions:{where:{source:{not:"QUICK_INCOME"},date:{lt:tomorrow}},select:{type:true,amountCents:true}},incomingTransactions:{where:{date:{lt:tomorrow}},select:{amountCents:true}}},orderBy:{createdAt:"asc"}}),
+    prisma.financeTransaction.groupBy({by:["type"],where:{workspaceId,source:{not:"QUICK_INCOME"},date:{gte:monthStart,lt:tomorrow}},_sum:{amountCents:true}}),
     prisma.subscription.findMany({where:{workspaceId,status:"ACTIVE"}}),
     prisma.debt.aggregate({where:{workspaceId,status:"ACTIVE"},_sum:{remainingBalanceCents:true}}),
     prisma.savingsGoal.aggregate({where:{workspaceId,status:"ACTIVE"},_sum:{currentAmountCents:true,targetAmountCents:true}}),
@@ -46,7 +113,7 @@ export async function monthlyCashFlow(workspaceId: string, months=6, today=new D
   const until=dateKeyToUTC(addDays(today,1));
   const rows=await prisma.$queryRaw<Array<{month:Date;type:string;total:bigint}>>(Prisma.sql`
     SELECT date_trunc('month', "date") AS month, "type"::text AS type, SUM("amountCents")::bigint AS total
-    FROM "FinanceTransaction" WHERE "workspaceId"=${workspaceId} AND "date">=${from} AND "date"<${until}
+    FROM "FinanceTransaction" WHERE "workspaceId"=${workspaceId} AND "source"<>'QUICK_INCOME' AND "date">=${from} AND "date"<${until}
     GROUP BY 1,2 ORDER BY 1 ASC`);
   const map=new Map(monthKeys.map(key=>[key,{month:key,income:0,expenses:0}]));
   for(const row of rows){const key=row.month.toISOString().slice(0,7);const item=map.get(key)||{month:key,income:0,expenses:0};if(row.type==="INCOME"||row.type==="REFUND")item.income+=Number(row.total)/100;if(row.type==="EXPENSE")item.expenses+=Number(row.total)/100;map.set(key,item);}
@@ -117,4 +184,14 @@ export async function financeAnalytics(workspaceId:string,today:string){
     budgets:budgets.map((budget,index)=>{const spent=budgetSpending[index]._sum.amountCents||0;return {category:budget.category.name,color:budget.category.color,spent:spent/100,remaining:Math.max(0,budget.limitCents-spent)/100,limit:budget.limitCents/100,usage:Math.round(spent/budget.limitCents*100)};}),
     upcoming,
   };
+}
+
+/** The monthly income reference set on the finance overview (latest "renda mensal" entry). */
+export async function monthlyIncomeReference(workspaceId: string, today: string) {
+  const row = await prisma.financeTransaction.findFirst({
+    where: { workspaceId, type: "INCOME", recurring: true, tags: { has: "renda-mensal:tbb" }, date: { lt: dateKeyToUTC(addDays(today, 1)) } },
+    select: { amountCents: true },
+    orderBy: [{ date: "desc" }, { updatedAt: "desc" }],
+  });
+  return row?.amountCents ?? 0;
 }

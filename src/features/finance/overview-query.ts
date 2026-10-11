@@ -2,9 +2,10 @@ import { Prisma } from "@prisma/client";
 import { addDays, dateKeyToUTC, startOfMonth } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
 import { summarizeCardStatements, type StatementRow } from "./card-statements";
-import { calculateFixedExpenses } from "./fixed-expenses";
-import { cardStatementRows } from "./queries";
+import { calculateFixedExpenses, fixedExpenseKey } from "./fixed-expenses";
+import { cardStatementRows, creditCardPositions, type StatementViewer } from "./queries";
 import { isUnassignedAccount } from "./unassigned-account";
+import { groupBankAccounts, invoiceFunding } from "./bank-accounts";
 
 export type FinanceOverviewData = Awaited<ReturnType<typeof financeOverview>>;
 
@@ -40,9 +41,10 @@ function nextSubscriptionDate(initial: Date, cycle: string, customDays: number |
   return value;
 }
 
-// Card statements are private to their owner, so partner and together scopes call this
-// without `cardStatements` and never read them.
-export async function financeOverview(workspaceId: string, today: string, options: { cardStatements?: boolean } = {}) {
+// Card statements are private to the session's owner: they are read only when that owner asks for
+// their own workspace, so partner and together scopes never see them.
+export async function financeOverview(workspaceId: string, today: string, options: { statementViewer?: StatementViewer } = {}) {
+  const statementViewer = options.statementViewer?.workspaceId === workspaceId ? options.statementViewer : null;
   const todayDate = dateKeyToUTC(today);
   const tomorrow = dateKeyToUTC(addDays(today, 1));
   const monthStart = dateKeyToUTC(startOfMonth(today));
@@ -54,7 +56,6 @@ export async function financeOverview(workspaceId: string, today: string, option
     accounts,
     originMovements,
     incomingTransfers,
-    currentAccountMovements,
     periodRows,
     dailyRows,
     currentCategories,
@@ -70,6 +71,8 @@ export async function financeOverview(workspaceId: string, today: string, option
     investmentPositions,
     investmentMaturities,
     statementRows,
+    plan,
+    plannedFixed,
   ] = await Promise.all([
     prisma.account.findMany({
       where: { workspaceId, isArchived: false },
@@ -78,29 +81,24 @@ export async function financeOverview(workspaceId: string, today: string, option
     }),
     prisma.financeTransaction.groupBy({
       by: ["accountId", "type"],
-      where: { workspaceId },
+      where: { workspaceId, source: { not: "QUICK_INCOME" }, date: { lt: tomorrow } },
       _sum: { amountCents: true },
     }),
     prisma.financeTransaction.groupBy({
       by: ["destinationAccountId"],
-      where: { workspaceId, type: "TRANSFER", destinationAccountId: { not: null } },
-      _sum: { amountCents: true },
-    }),
-    prisma.financeTransaction.groupBy({
-      by: ["accountId", "type"],
-      where: { workspaceId, date: currentRange },
+      where: { workspaceId, type: "TRANSFER", destinationAccountId: { not: null }, date: { lt: tomorrow } },
       _sum: { amountCents: true },
     }),
     prisma.$queryRaw<PeriodRow[]>(Prisma.sql`
       SELECT date_trunc('month', "date") AS period, "type"::text AS type, SUM("amountCents")::bigint AS total
       FROM "FinanceTransaction"
-      WHERE "workspaceId"=${workspaceId} AND "date">=${previousStart} AND "date"<${tomorrow}
+      WHERE "workspaceId"=${workspaceId} AND "source"<>'QUICK_INCOME' AND "date">=${previousStart} AND "date"<${tomorrow}
       GROUP BY 1,2 ORDER BY 1 ASC
     `),
     prisma.$queryRaw<DailyRow[]>(Prisma.sql`
       SELECT "date" AS day, "type"::text AS type, SUM("amountCents")::bigint AS total
       FROM "FinanceTransaction"
-      WHERE "workspaceId"=${workspaceId} AND "date">=${monthStart} AND "date"<${tomorrow}
+      WHERE "workspaceId"=${workspaceId} AND "source"<>'QUICK_INCOME' AND "date">=${monthStart} AND "date"<${tomorrow}
       GROUP BY 1,2 ORDER BY 1 ASC
     `),
     prisma.financeTransaction.groupBy({
@@ -120,8 +118,8 @@ export async function financeOverview(workspaceId: string, today: string, option
       select: { id: true, name: true },
     }),
     prisma.financeTransaction.findMany({
-      where: { workspaceId, type: "EXPENSE", recurring: true, date: currentRange },
-      select: { amountCents: true, description: true, merchant: true },
+      where: { workspaceId, type: "EXPENSE", date: currentRange },
+      select: { amountCents: true, description: true, merchant: true, recurring: true },
     }),
     prisma.subscription.findMany({
       where: { workspaceId, status: "ACTIVE" },
@@ -137,12 +135,12 @@ export async function financeOverview(workspaceId: string, today: string, option
       orderBy: { createdAt: "asc" },
     }),
     prisma.financeTransaction.findFirst({
-      where: { workspaceId, type: "INCOME", recurring: true, tags: { has: "renda-mensal:tbb" }, date: { lt: tomorrow } },
+      where: { workspaceId, type: "INCOME", source: "QUICK_INCOME" },
       select: { amountCents: true, accountId: true, account: { select: { name: true } } },
       orderBy: [{ date: "desc" }, { updatedAt: "desc" }],
     }),
     prisma.financeTransaction.findMany({
-      where: { workspaceId, type: { not: "TRANSFER" } },
+      where: { workspaceId, source: { not: "QUICK_INCOME" }, type: { not: "TRANSFER" } },
       select: { id: true, type: true, description: true, merchant: true, amountCents: true, date: true, source: true, account: { select: { name: true } }, category: { select: { name: true } } },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       take: 8,
@@ -166,9 +164,12 @@ export async function financeOverview(workspaceId: string, today: string, option
       orderBy: { maturityDate: "asc" },
       take: 5,
     }),
-    options.cardStatements ? cardStatementRows(workspaceId) : Promise.resolve<StatementRow[]>([]),
+    statementViewer ? cardStatementRows(statementViewer) : Promise.resolve<StatementRow[]>([]),
+    prisma.financePlan.findUnique({ where: { workspaceId }, include: { receivingAccount: { select: { name: true, type: true, isArchived: true } } } }),
+    prisma.fixedExpense.findMany({ where: { workspaceId, isActive: true }, orderBy: [{ dueDay: "asc" }, { name: "asc" }] }),
   ]);
   const statements = summarizeCardStatements(statementRows, today);
+  const positions = await creditCardPositions(workspaceId, today, statementRows);
 
   const categoryById = new Map(categoryNames.map((category) => [category.id, category.name]));
   const previousCategoryAmounts = new Map(previousCategories.map((category) => [category.categoryId, category._sum.amountCents || 0]));
@@ -212,20 +213,20 @@ export async function financeOverview(workspaceId: string, today: string, option
     dailyMap.set(date, point);
   }
 
-  const fixed = calculateFixedExpenses(recurringExpenses, subscriptions);
-  const incomeReferenceCents = monthlyIncome?.amountCents || current.incomeCents;
+  const fixedNames = [...plannedFixed.map((item)=>item.name), ...subscriptions.flatMap((item)=>[item.name,item.merchant||""])].map(fixedExpenseKey).filter(Boolean);
+  const postedFixed = recurringExpenses.filter((item)=>item.recurring || [item.description,item.merchant||""].some((name)=>fixedNames.includes(fixedExpenseKey(name))));
+  const fixed = calculateFixedExpenses(postedFixed, subscriptions, plannedFixed);
+  const incomeReferenceCents = plan ? plan.incomeCents : monthlyIncome?.amountCents || 0;
   const fixedPaidCents = Math.min(current.expensesCents, fixed.postedCents);
-  const creditCards = accountRows.filter((account) => account.type === "CREDIT_CARD").map((account) => {
-    const spentCents = Math.max(0, -(accountOrigin.get(account.id) || 0));
-    const monthSpentCents = Math.max(0, currentAccountMovements
-      .filter((movement) => movement.accountId === account.id && (movement.type === "EXPENSE" || movement.type === "REFUND"))
-      .reduce((sum, movement) => sum + (movement.type === "EXPENSE" ? movement._sum.amountCents || 0 : -(movement._sum.amountCents || 0)), 0));
-    const limitCents = account.creditLimitCents || 0;
-    const due = nextDueDate(today, account.dueDay);
-    // A card with registered statements is billed by them; its ledger spending is not added again.
-    const statement = statements.byAccount[account.id];
-    return { id: account.id, name: account.name, institution: account.institution, spentCents, monthSpentCents, limitCents, availableCents: Math.max(0, limitCents - monthSpentCents), usage: limitCents ? Math.round(monthSpentCents / limitCents * 100) : null, closingDay: account.closingDay, dueDay: account.dueDay, nextDueDate: due?.toISOString().slice(0, 10) || null,
-      invoiceCents: statement ? statement.openCents : monthSpentCents, invoiceSource: statement ? "STATEMENT" as const : "LEDGER" as const, statement: statement || null };
+  // Same limit rule as the accounts and statements screens: one breakdown per card.
+  const creditCards = positions.map((card) => {
+    const due = nextDueDate(today, card.dueDay);
+    return {
+      id: card.id, name: card.name, institution: card.institution, limitCents: card.creditLimitCents || 0, closingDay: card.closingDay, dueDay: card.dueDay,
+      nextDueDate: due?.toISOString().slice(0, 10) || null,
+      // A card with registered statements is billed by them; its ledger purchases are not added again.
+      invoiceCents: card.breakdown.openCents, invoiceSource: card.totals ? "STATEMENT" as const : "LEDGER" as const, statement: card.totals, breakdown: card.breakdown,
+    };
   });
 
   const upcoming = [
@@ -240,7 +241,7 @@ export async function financeOverview(workspaceId: string, today: string, option
       const due = nextDueDate(today, item.dueDay);
       return due ? [{ id: `debt-${item.id}`, label: item.name, kind: "DEBT" as const, amountCents: item.minimumPaymentCents, date: due }] : [];
     }),
-    ...creditCards.flatMap((item) => item.invoiceSource === "LEDGER" && item.nextDueDate && item.monthSpentCents > 0 ? [{ id: `card-${item.id}`, label: item.name, kind: "CARD" as const, amountCents: item.monthSpentCents, date: dateKeyToUTC(item.nextDueDate) }] : []),
+    ...creditCards.flatMap((item) => item.invoiceSource === "LEDGER" && item.nextDueDate && item.invoiceCents > 0 ? [{ id: `card-${item.id}`, label: item.name, kind: "CARD" as const, amountCents: item.invoiceCents, date: dateKeyToUTC(item.nextDueDate) }] : []),
     ...statements.open.map((item) => ({ id: `statement-${item.id}`, label: item.accountName, kind: "CARD" as const, amountCents: item.amountCents, date: dateKeyToUTC(item.dueDate!) })),
     ...investmentMaturities.flatMap((item) => item.maturityDate ? [{ id: `investment-${item.asset.id}`, label: item.asset.ticker || item.asset.name, kind: "INVESTMENT" as const, amountCents: item.principalCents, date: item.maturityDate }] : []),
   ].filter((item) => item.date >= todayDate && item.date <= sevenDays)
@@ -249,7 +250,8 @@ export async function financeOverview(workspaceId: string, today: string, option
     .map((item) => ({ ...item, date: item.date.toISOString().slice(0, 10) }));
 
   const debtCents = debts.reduce((sum, debt) => sum + debt.remainingBalanceCents, 0);
-  const financialNetWorthCents = accountRows.filter((account) => !account.unassigned).reduce((sum, account) => sum + account.balanceCents, 0) - debtCents;
+  const funding = invoiceFunding(accountRows, statementRows, today);
+  const financialNetWorthCents = accountRows.filter((account) => !account.unassigned && account.type!=="CREDIT_CARD").reduce((sum, account) => sum + account.balanceCents, 0) - positions.reduce((sum,card)=>sum+card.breakdown.committedCents,0) - debtCents;
   // A conta Finance vinculada já carrega o principal transferido. Somamos apenas
   // valorização e resultado realizado; carteiras sem vínculo entram pelo valor atual.
   const investmentAdjustmentCents = investmentPositions.reduce((sum, position) => position.account.linkedFinancialAccountId
@@ -262,18 +264,22 @@ export async function financeOverview(workspaceId: string, today: string, option
 
   return {
     today,
+    canExportReport: statementViewer?.role === "OWNER",
     metrics: {
       netWorthCents,
       incomeCents: current.incomeCents,
       expensesCents: current.expensesCents,
       balanceCents: current.balanceCents,
+      cashBalanceCents: funding.cashCents,
+      reserveBalanceCents: funding.reserveCents,
       previousBalanceCents: previous.balanceCents,
       fixedCents: fixed.amountCents,
       openInvoicesCents: creditCards.reduce((sum, card) => sum + card.invoiceCents, 0),
       incomeReferenceCents,
       fixedPaidCents,
       variableCents: Math.max(0, current.expensesCents - fixedPaidCents),
-      availableCents: Math.max(0, incomeReferenceCents - current.expensesCents),
+      availableCents: Math.max(0, incomeReferenceCents - fixed.amountCents - Math.max(0,current.expensesCents-fixedPaidCents)),
+      committedIncomeCents: fixed.amountCents + Math.max(0,current.expensesCents-fixedPaidCents),
       debtCents,
       savingsCents: current.balanceCents,
       totalSavingsCents,
@@ -281,7 +287,7 @@ export async function financeOverview(workspaceId: string, today: string, option
       investmentValueCents,
       investmentAdjustmentCents,
     },
-    monthlyIncome: { amountCents: monthlyIncome?.amountCents || 0, accountId: monthlyIncome?.accountId || "", accountName: monthlyIncome?.account.name || null },
+    monthlyIncome: { amountCents: plan ? plan.incomeCents : monthlyIncome?.amountCents || 0, accountId: plan?.receivingAccount&&!plan.receivingAccount.isArchived ? plan.receivingAccountId || "" : "", accountName: plan?.receivingAccount?.name || null, payDay: plan?.payDay || null, legacy: !plan && !!monthlyIncome },
     daily: [...dailyMap.values()],
     categories: currentCategories.map((category) => {
       const amountCents = category._sum.amountCents || 0;
@@ -289,6 +295,9 @@ export async function financeOverview(workspaceId: string, today: string, option
       return { category: category.categoryId ? categoryById.get(category.categoryId) || "Categoria removida" : "Sem categoria", amount: amountCents / 100, amountCents, previousCents: beforeCents, delta: beforeCents ? Math.round((amountCents - beforeCents) / beforeCents * 100) : null };
     }),
     accounts: accountRows.map(({ id, name, institution, type, balanceCents, unassigned }) => ({ id, name, institution, type, balanceCents, unassigned })),
+    banks: groupBankAccounts(accountRows).map(({ id, name, institution, cashCents, reserveCents, hasCash, accounts: products }) => ({ id, name, institution, cashCents, reserveCents, hasCash, cardCount: products.filter((account) => account.type === "CREDIT_CARD").length })),
+    funding: statementViewer?.role === "OWNER" ? funding : null,
+    plannedFixed: plannedFixed.map(({id,name,amountCents,dueDay,notes})=>({id,name,amountCents,dueDay,notes})),
     creditCards,
     cardStatements: {
       openCount: statements.open.length,

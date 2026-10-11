@@ -74,6 +74,11 @@ describe("card statement file validation", () => {
     expect(errorsOf(file).join()).toContain("externalKey repetido");
     expect(errorsOf(withRecord(1, { dueDate: file.records[0].dueDate })).join()).toContain("Mais de um registro de Alfa Bank");
   });
+  it("rejects repeated card competence even with different due dates or record kinds", () => {
+    const file=syntheticStatementFile();
+    file.records[13]={...file.records[13],referenceMonth:"2031-05"};
+    expect(errorsOf(file).join()).toContain("competência 2031-05");
+  });
 });
 
 describe("card account resolution", () => {
@@ -102,7 +107,7 @@ function existingFrom(file: CardStatementFile, accountFor: (issuerKey: string) =
     id: `st-${index}`, accountId: accountFor(record.issuerKey), externalKey: record.externalKey, periodKey: record.periodKey, kind: record.kind,
     status: record.status, amountCents: record.amountCents, dueDate: record.dueDate, closingDate: record.closingDate, closingDay: record.closingDay,
     referenceMonth: record.referenceMonth, paidAt: record.paidAt, reconciliation: "NOT_REQUIRED", overlapsStatementId: null,
-    sourceRecordType: record.recordType, sourceAsOf: file.asOfDate, notes: record.notes,
+    sourceRecordType: record.recordType, sourceAsOf: file.asOfDate, notes: record.notes, addedCents: 0,
   }));
 }
 const reuseAll = (file: CardStatementFile) => resolveIssuerAccounts(file.records, [
@@ -114,7 +119,7 @@ describe("idempotent import plan", () => {
     const file = parsed();
     const plan = planCardStatementImport(file, resolveIssuerAccounts(file.records, []).resolved, []);
     expect(plan.errors).toEqual([]);
-    expect(plan.counts).toEqual({ create: 27, update: 0, keep: 0, conflict: 0 });
+    expect(plan.counts).toEqual({ create: 27, update: 0, promote: 0, keep: 0, conflict: 0 });
     const forecast = plan.items.find((item) => item.record.externalKey === KEYS.betulaFirstForecast)!;
     expect(forecast.overlap).toEqual({ targetExternalKey: KEYS.betulaCurrent, targetExistingId: null, reconciliation: "PENDING" });
     expect(plan.items.filter((item) => item.overlap)).toHaveLength(1);
@@ -125,7 +130,7 @@ describe("idempotent import plan", () => {
     const existing = existingFrom(file, (key) => `acc-${key}`);
     existing[FIRST_FORECAST] = { ...existing[FIRST_FORECAST], reconciliation: "PENDING", overlapsStatementId: `st-${OPEN_BETULA}` };
     const plan = planCardStatementImport(file, reuseAll(file), existing);
-    expect(plan.counts).toEqual({ create: 0, update: 0, keep: 27, conflict: 0 });
+    expect(plan.counts).toEqual({ create: 0, update: 0, promote: 0, keep: 27, conflict: 0 });
   });
 
   it("matches a newer file by card and period even when its keys differ, without duplicating", () => {

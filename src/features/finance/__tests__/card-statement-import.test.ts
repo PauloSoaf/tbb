@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { applyCardStatementImport, previewCardStatementImport, type CardStatementDb } from "../card-statement-import";
 import { summarizeCardStatements, type StatementRow } from "../card-statements";
-import { AS_OF, EXPECTED, KEYS, syntheticStatementFile } from "./statement-fixture";
+import { AS_OF, EXPECTED, KEYS, syntheticKnownStatementFile, syntheticStatementFile } from "./statement-fixture";
 
 type NewRow = Record<string, unknown> & { workspaceId: string };
 type Row = NewRow & { id: string };
@@ -10,7 +10,7 @@ const day = (value: unknown) => (value instanceof Date ? value.toISOString().sli
 /** In-memory stand-in for the three tables the importer may touch. It enforces the same
  * uniqueness, tenant and integrity rules as the migration, and refuses any other table. */
 function fakeDb() {
-  const accounts: Row[] = [], statements: Row[] = [], events: Row[] = [];
+  const accounts: Row[] = [], statements: Row[] = [], events: Row[] = [], purchases: Row[] = [];
   let sequence = 0;
   const id = (prefix: string) => `${prefix}-${++sequence}`;
   const pick = (row: Row, select?: Record<string, unknown>) => select ? Object.fromEntries(Object.keys(select).filter((key) => key in row).map((key) => [key, structuredClone(row[key])])) : structuredClone(row);
@@ -45,6 +45,8 @@ function fakeDb() {
       },
     },
     activityEvent: { create: async ({ data }: { data: Record<string, unknown> }) => { const row = { ...data, id: id("ev") } as Row; events.push(row); return row; } },
+    // Read-only: the importer may look up expenses added to a bill, but has no way to write them.
+    financeTransaction: { findMany: async () => purchases },
   };
   const touched = new Set<string>();
   const guarded = new Proxy(db, { get(target, property: string) {
@@ -52,7 +54,7 @@ function fakeDb() {
     if (!(property in target)) throw new Error(`Importer touched forbidden table: ${property}`);
     return target[property as keyof typeof target];
   } });
-  return { db: guarded as unknown as CardStatementDb, accounts, statements, events, touched };
+  return { db: guarded as unknown as CardStatementDb, accounts, statements, events, purchases, touched };
 }
 
 const W1 = { workspaceId: "w1", userId: "u1" };
@@ -84,7 +86,7 @@ describe("card statement import against the database layer", () => {
     const fake = fakeDb();
     const before = neighbour(fake);
     const { report, result } = await importInto(fake);
-    expect(report.counts).toEqual({ create: 27, update: 0, keep: 0, conflict: 0 });
+    expect(report.counts).toEqual({ create: 27, update: 0, promote: 0, keep: 0, conflict: 0 });
     expect(report.accounts.map((account) => account.action)).toEqual(["CREATE", "CREATE", "CREATE"]);
     expect(result).toEqual({ counts: report.counts, accountsCreated: 3, persisted: 27 });
     expect(fake.statements.filter((row) => row.workspaceId === "w1")).toHaveLength(27);
@@ -99,11 +101,19 @@ describe("card statement import against the database layer", () => {
     const fake = fakeDb();
     await importInto(fake);
     const snapshot = structuredClone(fake.statements);
+    const creates = vi.spyOn(fake.db.cardStatement, "create");
+    const updates = vi.spyOn(fake.db.cardStatement, "updateMany");
+    const accountCreates = vi.spyOn(fake.db.account, "create");
+    const audits = vi.spyOn(fake.db.activityEvent, "create");
     const { report, result } = await importInto(fake);
-    expect(report.counts).toEqual({ create: 0, update: 0, keep: 27, conflict: 0 });
+    expect(report.counts).toEqual({ create: 0, update: 0, promote: 0, keep: 27, conflict: 0 });
     expect(result.persisted).toBe(0);
     expect(fake.statements).toEqual(snapshot);
     expect(fake.accounts).toHaveLength(3);
+    expect(creates).not.toHaveBeenCalled();
+    expect(updates).not.toHaveBeenCalled();
+    expect(accountCreates).not.toHaveBeenCalled();
+    expect(audits).not.toHaveBeenCalled();
   });
 
   it("preserves statuses, the two zero-value paid statements and unknown payment dates", async () => {
@@ -131,10 +141,10 @@ describe("card statement import against the database layer", () => {
     expect(summary.forecastCountedCents).toBe(EXPECTED.forecastCents - EXPECTED.pendingCents);
   });
 
-  it("never touches the ledger or debts", async () => {
+  it("only reads the ledger and never touches debts", async () => {
     const fake = fakeDb();
     await importInto(fake);
-    expect([...fake.touched].sort()).toEqual(["account", "activityEvent", "cardStatement"]);
+    expect([...fake.touched].sort()).toEqual(["account", "activityEvent", "cardStatement", "financeTransaction"]);
   });
 
   it("writes nothing when the workspace changed after the preview", async () => {
@@ -155,7 +165,7 @@ describe("card statement import against the database layer", () => {
     const newer = syntheticStatementFile("2031-04-10");
     newer.records[15] = { ...newer.records[15], amountCents: 11_112 };
     const report = await previewCardStatementImport(fake.db, "w1", newer, "2031-04-10");
-    expect(report.counts).toEqual({ create: 0, update: 1, keep: 25, conflict: 1 });
+    expect(report.counts).toEqual({ create: 0, update: 1, promote: 0, keep: 25, conflict: 1 });
     await expect(applyCardStatementImport(fake.db, W1, newer, { fingerprint: report.fingerprint!, acceptConflicts: false, fileSha256: "test" })).rejects.toThrow("conflito");
     await applyCardStatementImport(fake.db, W1, newer, { fingerprint: report.fingerprint!, acceptConflicts: true, fileSha256: "test" });
     expect(paid.amountCents).toBe(999);
@@ -163,5 +173,56 @@ describe("card statement import against the database layer", () => {
     expect(metadata.updated.map((item) => item.before.amountCents)).toEqual([11_111]);
     expect(metadata.conflicts).toEqual([paid.externalKey]);
     expect(fake.statements).toHaveLength(27);
+  });
+});
+
+describe("forecast promotion database integrity", () => {
+  it("does not import a lower statement total than the existing included purchases", async () => {
+    const fake=fakeDb();await importInto(fake);
+    const open=fake.statements.find(row=>row.status==="OPEN")!;
+    fake.purchases.push({id:"included",workspaceId:"w1",cardStatementId:open.id,statementDetailMode:"ALREADY_INCLUDED",amountCents:90000});
+    const raw=syntheticStatementFile();raw.records[12]={...raw.records[12],amountCents:89999};raw.summary.currentOutstandingCents=EXPECTED.openCents-100001+89999;
+    const report=await previewCardStatementImport(fake.db,"w1",raw,AS_OF);
+    expect(report.counts).toMatchObject({conflict:1,update:0});
+  });
+  it("promotes all seven forecasts preserving ids and clearing reconciliation and overlap together", async () => {
+    const fake=fakeDb(); await importInto(fake);
+    const ids=fake.statements.filter(row=>row.kind==="MONTHLY_PROJECTION").map(row=>row.id);
+    const neighbourBefore=neighbour(fake);
+    const result=await importInto(fake,syntheticKnownStatementFile());
+    expect(result.report.counts).toEqual({create:0,update:0,promote:7,keep:20,conflict:0});
+    expect(fake.statements.filter(row=>row.workspaceId==="w1")).toHaveLength(27);
+    expect(ids.map(id=>fake.statements.find(row=>row.id===id))).toEqual(expect.arrayContaining(ids.map(id=>expect.objectContaining({id,kind:"STATEMENT",status:"FUTURE_KNOWN",reconciliation:"NOT_REQUIRED",overlapsStatementId:null}))));
+    expect(fake.statements.filter(row=>row.workspaceId==="w2")).toEqual(neighbourBefore);
+    const metadata=fake.events.at(-1)!.metadata as {promoted:{id:string;before:{kind:string}}[]};
+    expect(metadata.promoted).toHaveLength(7);
+    expect(metadata.promoted.every(item=>item.before.kind==="MONTHLY_PROJECTION")).toBe(true);
+  });
+  it("conflicts with the old file after promotion and writes nothing, even when conflicts are skipped", async () => {
+    const fake=fakeDb();await importInto(fake);await importInto(fake,syntheticKnownStatementFile());
+    const before=structuredClone({statements:fake.statements,accounts:fake.accounts,events:fake.events});
+    const raw=syntheticStatementFile();const report=await previewCardStatementImport(fake.db,"w1",raw,AS_OF);
+    expect(report.counts).toEqual({create:0,update:0,promote:0,keep:20,conflict:7});
+    await expect(applyCardStatementImport(fake.db,W1,raw,{fingerprint:report.fingerprint!,acceptConflicts:false,fileSha256:"test"})).rejects.toThrow("conflito");
+    await applyCardStatementImport(fake.db,W1,raw,{fingerprint:report.fingerprint!,acceptConflicts:true,fileSha256:"test"});
+    expect({statements:fake.statements,accounts:fake.accounts,events:fake.events}).toEqual(before);
+  });
+  it.each(["INCLUDED_IN_STATEMENT","ADDED_TO_STATEMENT"])("blocks promotion with existing user classification %s",async mode=>{
+    const fake=fakeDb();await importInto(fake);
+    const forecast=fake.statements.find(row=>row.kind==="MONTHLY_PROJECTION")!;
+    if(mode==="INCLUDED_IN_STATEMENT") forecast.reconciliation=mode;
+    else fake.purchases.push({id:"manual-purchase",workspaceId:"w1",cardStatementId:forecast.id,statementDetailMode:mode,amountCents:1});
+    const raw=syntheticKnownStatementFile();const report=await previewCardStatementImport(fake.db,"w1",raw,AS_OF);
+    expect(report.counts!.conflict).toBe(1);
+    const snapshot=structuredClone(fake.statements);
+    await expect(applyCardStatementImport(fake.db,W1,raw,{fingerprint:report.fingerprint!,acceptConflicts:false,fileSha256:"test"})).rejects.toThrow("conflito");
+    expect(fake.statements).toEqual(snapshot);
+  });
+  it("rejects a known bill when a forecast remains in the same competence",async()=>{
+    const fake=fakeDb();await importInto(fake,syntheticKnownStatementFile());
+    const known=fake.statements.find(row=>row.externalKey==="known:2031-05")!;
+    fake.statements.push({...known,id:"remaining",externalKey:"remaining-forecast",periodKey:"month:2031-05",kind:"MONTHLY_PROJECTION",status:"FORECAST",dueDate:null});
+    const report=await previewCardStatementImport(fake.db,"w1",syntheticKnownStatementFile(),AS_OF);
+    expect(report.counts).toMatchObject({create:0,conflict:1});
   });
 });

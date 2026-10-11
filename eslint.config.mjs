@@ -14,6 +14,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Private runtime data, local QA scripts and agent tooling are not application source.
+    ".data/**",
+    ".codex/**",
+    ".agents/**",
   ]),
 ]);
 

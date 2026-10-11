@@ -9,7 +9,7 @@ import { confirmCardStatements, previewCardStatements } from "./actions";
 import type { CardStatementImportReport } from "./card-statement-import";
 import { money } from "./money";
 
-const actionLabel = { CREATE: "Criar", UPDATE: "Atualizar", KEEP: "Manter", CONFLICT: "Conflito" } as const;
+const actionLabel = { CREATE: "Criar", UPDATE: "Atualizar", PROMOTE: "Promover", KEEP: "Manter", CONFLICT: "Conflito" } as const;
 const typeLabel = { PAST_STATEMENT: "Histórico", CURRENT_STATEMENT: "Atual", FUTURE_STATEMENT: "Futura conhecida", FUTURE_MONTHLY_PROJECTION: "Previsão mensal" } as const;
 const statusLabel = { PAID: "Paga", OPEN: "Aberta", FUTURE_KNOWN: "Futura", FORECAST: "Prevista" } as const;
 const day = (value: string | null) => (value ? formatDay(value, "pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—");
@@ -54,7 +54,7 @@ export function CardStatementImport() {
       </div>}
       {counts && <div className="stat-grid">
         <div className="stat-card"><span>Serão criadas</span><strong>{counts.create}</strong></div>
-        <div className="stat-card"><span>Serão atualizadas</span><strong>{counts.update}</strong></div>
+        <div className="stat-card"><span>Serão atualizadas</span><strong>{counts.update}</strong>{counts.promote > 0 && <small className="muted">+ {counts.promote} previsão(ões) promovida(s) a fatura</small>}</div>
         <div className="stat-card"><span>Mantidas como estão</span><strong>{counts.keep}</strong></div>
         <div className="stat-card"><span>Conflitos (preservados)</span><strong>{counts.conflict}</strong></div>
       </div>}
@@ -77,8 +77,8 @@ export function CardStatementImport() {
       {counts && counts.conflict > 0 && <label className="row" style={{ flexDirection: "row" }}><input type="checkbox" checked={acceptConflicts} onChange={(event) => setAcceptConflicts(event.target.checked)}/>Manter os {counts.conflict} registro(s) em conflito como já estão salvos</label>}
       <div className="row justify-between">
         <button type="button" className="button-secondary" onClick={reset} disabled={pending}>Cancelar</button>
-        <button type="button" className="button" onClick={confirm} disabled={pending || !report.ok || !report.fingerprint || (!!counts?.conflict && !acceptConflicts) || !!(counts && counts.create + counts.update === 0)}>
-          {counts && counts.create + counts.update === 0 ? "Nada a importar" : `Confirmar importação (${(counts?.create || 0) + (counts?.update || 0)})`}
+        <button type="button" className="button" onClick={confirm} disabled={pending || !report.ok || !report.fingerprint || (!!counts?.conflict && !acceptConflicts) || !!(counts && counts.create + counts.update + counts.promote === 0)}>
+          {counts && counts.create + counts.update + counts.promote === 0 ? "Nada a importar" : `Confirmar importação (${(counts?.create || 0) + (counts?.update || 0) + (counts?.promote || 0)})`}
         </button>
       </div>
     </>}

@@ -7,8 +7,9 @@ import { Modal } from "@/components/ui/Modal";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { AccountForm } from "./forms";
 import { useFinanceCopy } from "./finance-copy";
+import { FinanceReportExport } from "./FinanceReportExport";
 
-export function FinanceOverviewHeader() {
+export function FinanceOverviewHeader({canExportReport}:{canExportReport:boolean}) {
   const t = useFinanceCopy();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -21,6 +22,7 @@ export function FinanceOverviewHeader() {
   return <PageHeader eyebrow={t("eyebrow")} title={t("title")} description={t("subtitle")}>
     <Link className="button finance-primary-action" href="#captura"><Plus size={15}/>{t("addTransaction")}</Link>
     <Link className="button-secondary" href="/finance/imports"><Download size={15}/>{t("import")}</Link>
+    {canExportReport&&<FinanceReportExport/>}
     <div className="finance-more" ref={ref}>
       <button type="button" className="button-secondary" aria-expanded={open} onClick={() => setOpen((value) => !value)}>{t("more")}<ChevronDown size={14} className={open ? "rotate" : ""}/></button>
       <div className="finance-more-menu" data-open={open}>

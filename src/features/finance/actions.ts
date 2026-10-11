@@ -1,7 +1,7 @@
 "use server";
 
 import { createHash } from "node:crypto";
-import { Prisma } from "@prisma/client";
+import { Prisma, type FinanceTransaction } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { dayKey } from "@/lib/dates";
@@ -10,6 +10,8 @@ import { AuthorizationError, requirePermission } from "@/lib/tenancy/requirePerm
 import { dateOnly, parseMoney } from "./money";
 import { CsvFinanceImportParser, previewCsv, transactionFingerprint, type ImportPreviewRow } from "./import-engine";
 import { applyCardStatementImport, previewCardStatementImport } from "./card-statement-import";
+import { statementLinkError } from "./card-statements";
+import { interpretCardExpenseText } from "./natural-language";
 import { ensureUnassignedAccount } from "./unassigned-account";
 
 const text = (fd: FormData, key: string) => String(fd.get(key) || "").trim();
@@ -40,44 +42,141 @@ async function categoryRef(workspaceId: string, categoryId: string) {
   if (!category) throw new Error("Categoria indisponível neste workspace.");
   return category;
 }
+// A detailed card purchase belongs to its card's bill; moving it to another account detaches it.
+type StatementPurchase = Pick<FinanceTransaction, "id" | "accountId" | "type" | "amountCents" | "cardStatementId" | "statementDetailMode">;
+const purchaseSelect = { id: true, accountId: true, type: true, amountCents: true, cardStatementId: true, statementDetailMode: true } as const;
+/** Every edit path checks the same effective total inside its serializable transaction. */
+async function protectStatementPurchase(tx: Prisma.TransactionClient, ctx: { workspaceId: string; role: string }, current: StatementPurchase, change: { accountId?: string; type?: string; amountCents?: number; detach?: boolean }) {
+  if (!current.cardStatementId || !current.statementDetailMode) return {};
+  const detach = change.detach || (change.accountId !== undefined && change.accountId !== current.accountId) || (change.type !== undefined && change.type !== "EXPENSE");
+  const amount = change.amountCents ?? current.amountCents;
+  if (!detach && amount === current.amountCents) return {};
+  if (ctx.role !== "OWNER") throw new AuthorizationError("Somente o titular deste espaço pode alterar gastos vinculados a faturas.");
+  const statement = await statementForLink(tx, ctx.workspaceId, current.cardStatementId, current.accountId, current.id);
+  if (statement.status === "PAID" && current.statementDetailMode === "ADDED_TO_STATEMENT") throw new Error("Esta fatura já foi paga e o valor dela não muda.");
+  if (!detach) {
+    const error = statementLinkError({ status: statement.status, amountCents: statement.totalCents, detailedCents: statement.detailedCents }, current.statementDetailMode, amount);
+    if (error) throw new Error(error);
+  }
+  return detach ? { cardStatementId: null, statementDetailMode: null } : {};
+}
 async function log(tx: Prisma.TransactionClient, ctx: { workspaceId: string; userId: string }, type: string, entityType: string, entityId: string, metadata: Prisma.InputJsonValue = {}) {
   await tx.activityEvent.create({ data: { workspaceId: ctx.workspaceId, actorUserId: ctx.userId, type, entityType, entityId, metadata } });
+}
+
+const ACCOUNT_TYPES = ["CHECKING", "SAVINGS", "CASH", "CREDIT_CARD", "INVESTMENT", "DIGITAL_WALLET", "OTHER"] as const;
+/** Only fields the form actually sent are written: an edit never wipes a value it did not show,
+ * and the card's recurring cycle lives here, apart from the dates of each statement. */
+function accountFields(fd: FormData, creating: boolean) {
+  const sent = (key: string) => creating || fd.has(key);
+  const data: Partial<{ name: string; type: (typeof ACCOUNT_TYPES)[number]; institution: string | null; initialBalanceCents: number; creditLimitCents: number | null; closingDay: number | null; dueDay: number | null }> = {};
+  if (sent("name")) data.name = name(fd);
+  if (sent("type")) data.type = enumValue(fd, "type", ACCOUNT_TYPES, "CHECKING");
+  if (sent("institution")) data.institution = optional(fd, "institution", 200);
+  if (sent("initialBalance")) data.initialBalanceCents = cents(fd, "initialBalance", true, true);
+  if (sent("creditLimit")) data.creditLimitCents = text(fd, "creditLimit") ? cents(fd, "creditLimit", true) : null;
+  if (sent("closingDay")) data.closingDay = integer(fd, "closingDay", 1, 31);
+  if (sent("dueDay")) data.dueDay = integer(fd, "dueDay", 1, 31);
+  return data;
 }
 
 export async function saveAccount(fd: FormData) {
   const ctx = await requirePermission("WRITE");
   try {
-    const data = { name: name(fd), type: enumValue(fd, "type", ["CHECKING", "SAVINGS", "CASH", "CREDIT_CARD", "INVESTMENT", "DIGITAL_WALLET", "OTHER"], "CHECKING"), institution: optional(fd, "institution", 200), currency: "BRL", initialBalanceCents: cents(fd, "initialBalance", true, true), creditLimitCents: text(fd, "creditLimit") ? cents(fd, "creditLimit", true) : null, closingDay: integer(fd, "closingDay", 1, 31), dueDay: integer(fd, "dueDay", 1, 31) };
+    const id = text(fd, "id");
+    const data = accountFields(fd, !id);
     await prisma.$transaction(async tx => {
-      const id = text(fd, "id");
-      if (id) { const result = await tx.account.updateMany({ where: { id, workspaceId: ctx.workspaceId }, data }); if (!result.count) throw new Error("Conta não encontrada."); await log(tx, ctx, "account.updated", "Account", id); }
-      else { const item = await tx.account.create({ data: { ...data, workspaceId: ctx.workspaceId } }); await log(tx, ctx, "account.created", "Account", item.id); }
+      if (id) {
+        if (data.type && data.type !== "CREDIT_CARD" && await tx.cardStatement.count({ where: { workspaceId: ctx.workspaceId, accountId: id } })) throw new Error("Este cartão tem faturas registradas; o tipo da conta não pode mudar.");
+        const result = await tx.account.updateMany({ where: { id, workspaceId: ctx.workspaceId }, data });
+        if (!result.count) throw new Error("Conta não encontrada.");
+        await log(tx, ctx, "account.updated", "Account", id, { fields: Object.keys(data) });
+      } else {
+        const item = await tx.account.create({ data: { ...data, name: data.name!, currency: "BRL", workspaceId: ctx.workspaceId } });
+        await log(tx, ctx, "account.created", "Account", item.id);
+      }
     });
     invalidate(); return { success: "Conta salva." };
+  } catch (error) { return failure(error); }
+}
+
+/** Reconcile a bank balance without rewriting the opening balance or past transactions. */
+export async function reconcileAccountBalance(fd: FormData) {
+  const ctx = await requirePermission("WRITE");
+  try {
+    const id = text(fd, "id");
+    if (!text(fd, "balance")) throw new Error("Informe o saldo atual.");
+    const desired = cents(fd, "balance", true, true);
+    const today = dayKey(new Date(), ctx.workspace.timezone);
+    const entryDate = dateOnly(today);
+    const until = new Date(entryDate.getTime() + 86400000);
+    await prisma.$transaction(async tx => {
+      const account = await tx.account.findFirst({ where: { id, workspaceId: ctx.workspaceId, isArchived: false, type: { in: ["CHECKING", "SAVINGS", "CASH", "DIGITAL_WALLET"] } } });
+      if (!account) throw new Error("Selecione uma conta corrente, carteira ou reserva deste espaço.");
+      const [origin, incoming] = await Promise.all([
+        tx.financeTransaction.groupBy({ by: ["type"], where: { workspaceId: ctx.workspaceId, accountId: id, source: { not: "QUICK_INCOME" }, date: { lt: until } }, _sum: { amountCents: true } }),
+        tx.financeTransaction.aggregate({ where: { workspaceId: ctx.workspaceId, destinationAccountId: id, type: "TRANSFER", date: { lt: until } }, _sum: { amountCents: true } }),
+      ]);
+      const current = account.initialBalanceCents + (incoming._sum.amountCents || 0) + origin.reduce((sum, row) => sum + (["INCOME", "REFUND", "ADJUSTMENT"].includes(row.type) ? 1 : -1) * (row._sum.amountCents || 0), 0);
+      const adjustment = desired - current;
+      if (!adjustment) return;
+      const item = await tx.financeTransaction.create({ data: { workspaceId: ctx.workspaceId, accountId: id, type: "ADJUSTMENT", description: "Conferência do saldo da conta", amountCents: adjustment, date: entryDate, source: "BALANCE_RECONCILIATION", currency: "BRL" } });
+      await log(tx, ctx, "account.balance_reconciled", "FinanceTransaction", item.id, { accountId: id });
+    }, { isolationLevel: "Serializable" });
+    invalidate(); return { success: "Saldo atualizado." };
   } catch (error) { return failure(error); }
 }
 
 export async function saveMonthlyIncome(fd:FormData){
   const ctx=await requirePermission("WRITE");
   try{
-    const amountCents=cents(fd,"amount");
-    const entryDate=date(fd,"date");
-    const account=await accountOrUnassigned(ctx.workspaceId,text(fd,"accountId"));
-    const monthStart=dateOnly(`${entryDate.toISOString().slice(0,7)}-01`);
-    const nextMonth=new Date(Date.UTC(monthStart.getUTCFullYear(),monthStart.getUTCMonth()+1,1));
+    const amountCents=cents(fd,"amount",true);
+    const account=await accountRef(ctx.workspaceId,text(fd,"accountId"),false);
+    if(account&&!['CHECKING','CASH','DIGITAL_WALLET'].includes(account.type))throw new Error("Escolha uma conta de dinheiro para receber a renda, não o cartão.");
+    const payDay=integer(fd,"payDay",1,31);
     await prisma.$transaction(async tx=>{
-      const existing=await tx.financeTransaction.findFirst({where:{workspaceId:ctx.workspaceId,type:"INCOME",date:{gte:monthStart,lt:nextMonth},OR:[{tags:{has:"renda-mensal:tbb"}},{recurring:true,description:{contains:"renda mensal",mode:"insensitive"}}]},orderBy:{createdAt:"desc"}});
-      if(existing){
-        await tx.financeTransaction.update({where:{id:existing.id},data:{accountId:account.id,amountCents,date:entryDate,description:"Renda mensal",recurring:true,tags:[...new Set([...existing.tags,"renda-mensal:tbb"])],source:"QUICK_INCOME",revision:{increment:1}}});
-        await log(tx,ctx,"income.monthly_updated","FinanceTransaction",existing.id,{amountCents});
-      }else{
-        const item=await tx.financeTransaction.create({data:{workspaceId:ctx.workspaceId,accountId:account.id,type:"INCOME",description:"Renda mensal",amountCents,currency:"BRL",date:entryDate,recurring:true,tags:["renda-mensal:tbb"],source:"QUICK_INCOME"}});
-        await log(tx,ctx,"income.monthly_created","FinanceTransaction",item.id,{amountCents});
-      }
+      const data={incomeCents:amountCents,payDay,receivingAccountId:account?.id||null};
+      await tx.financePlan.upsert({where:{workspaceId:ctx.workspaceId},create:{workspaceId:ctx.workspaceId,...data},update:data});
+      await log(tx,ctx,"income.plan_saved","FinancePlan",ctx.workspaceId);
     });
     invalidate();
-    return {success:"Renda mensal atualizada."};
+    return {success:"Renda prevista atualizada. Nenhum recebimento foi lançado."};
   }catch(error){return failure(error)}
+}
+
+export async function receiveMonthlyIncome(fd:FormData){
+  const ctx=await requirePermission("WRITE");
+  try{
+    const amountCents=cents(fd,"amount");
+    const entryDate=date(fd,"date");
+    if(entryDate>dateOnly(dayKey(new Date(),ctx.workspace.timezone)))throw new Error("O recebimento confirmado não pode ter data futura.");
+    const account=await accountRef(ctx.workspaceId,text(fd,"accountId"));
+    if(!account||!['CHECKING','CASH','DIGITAL_WALLET'].includes(account.type))throw new Error("Escolha uma conta de dinheiro para receber a renda.");
+    const fingerprint=createHash('sha256').update(`income-receipt:${account.id}:${entryDate.toISOString()}:${amountCents}`).digest('hex');
+    await prisma.$transaction(async tx=>{
+      const item=await tx.financeTransaction.create({data:{workspaceId:ctx.workspaceId,accountId:account.id,type:"INCOME",description:"Recebimento de renda mensal",amountCents,currency:"BRL",date:entryDate,source:"MONTHLY_INCOME_RECEIVED",tags:["renda-mensal:recebida"],fingerprint}});
+      await log(tx,ctx,"income.received","FinanceTransaction",item.id);
+    });
+    invalidate();return {success:"Recebimento registrado no saldo da conta."};
+  }catch(error){return failure(error)}
+}
+
+export async function saveFixedExpense(fd:FormData){
+  const ctx=await requirePermission("WRITE");
+  try{
+    const id=text(fd,"id");
+    const data={name:name(fd),amountCents:cents(fd,"amount"),dueDay:integer(fd,"dueDay",1,31),notes:optional(fd,"notes")};
+    await prisma.$transaction(async tx=>{
+      if(id){const result=await tx.fixedExpense.updateMany({where:{id,workspaceId:ctx.workspaceId,isActive:true},data});if(!result.count)throw new Error("Gasto fixo não encontrado.");}
+      else{const item=await tx.fixedExpense.create({data:{workspaceId:ctx.workspaceId,...data}});await log(tx,ctx,"expense.plan_created","FixedExpense",item.id);}
+    });
+    invalidate();return {success:"Gasto fixo previsto salvo. Nenhuma despesa foi lançada."};
+  }catch(error){return failure(error)}
+}
+
+export async function archiveFixedExpense(fd:FormData){
+  const ctx=await requirePermission("WRITE");
+  try{const result=await prisma.fixedExpense.updateMany({where:{id:text(fd,"id"),workspaceId:ctx.workspaceId},data:{isActive:false}});if(!result.count)throw new Error("Gasto fixo não encontrado.");invalidate();return {success:"Previsão removida."};}catch(error){return failure(error)}
 }
 
 export async function saveCategory(fd: FormData) {
@@ -113,9 +212,15 @@ export async function saveTransaction(fd: FormData) {
     const data = { accountId: account.id, destinationAccountId: destination?.id || null, categoryId: category?.id || null, type, description: name(fd, "description"), merchant: optional(fd, "merchant", 200), amountCents: cents(fd, "amount", type === "ADJUSTMENT", type === "ADJUSTMENT"), currency: "BRL", date: date(fd, "date"), competenceDate: optionalDate(fd, "competenceDate"), installmentNumber, installmentTotal, notes: optional(fd, "notes", 2000), tags: text(fd, "tags").split(",").map(t => t.trim()).filter(Boolean).slice(0, 20).map(t => z.string().max(50).parse(t)), recurring: fd.get("recurring") === "on" };
     await prisma.$transaction(async tx => {
       const id = text(fd, "id");
-      if (id) { const result = await tx.financeTransaction.updateMany({ where: { id, workspaceId: ctx.workspaceId }, data: { ...data, revision: { increment: 1 } } }); if (!result.count) throw new Error("Lançamento não encontrado."); await log(tx, ctx, "transaction.updated", "FinanceTransaction", id); }
+      if (id) {
+        const current = await tx.financeTransaction.findFirst({ where: { id, workspaceId: ctx.workspaceId }, select: purchaseSelect });
+        if (!current) throw new Error("Lançamento não encontrado.");
+        const linkFields = await protectStatementPurchase(tx, ctx, current, data);
+        await tx.financeTransaction.updateMany({ where: { id, workspaceId: ctx.workspaceId }, data: { ...data, ...linkFields, revision: { increment: 1 } } });
+        await log(tx, ctx, "transaction.updated", "FinanceTransaction", id);
+      }
       else { const item = await tx.financeTransaction.create({ data: { ...data, workspaceId: ctx.workspaceId } }); await log(tx, ctx, "transaction.created", "FinanceTransaction", item.id, { amountCents: data.amountCents, type }); }
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     invalidate(); return { success: "Lançamento salvo." };
   } catch (error) { return failure(error); }
 }
@@ -130,10 +235,14 @@ export async function bulkTransactions(fd: FormData) {
     const result = await prisma.$transaction(async tx => {
       const count = await tx.financeTransaction.count({ where: { workspaceId: ctx.workspaceId, id: { in: ids } } });
       if (count !== new Set(ids).size) throw new Error("Um lançamento está indisponível neste workspace.");
+      if (operation === "DELETE") {
+        const linked = await tx.financeTransaction.findMany({ where: { workspaceId: ctx.workspaceId, id: { in: ids }, cardStatementId: { not: null } }, select: purchaseSelect });
+        for (const purchase of linked) await protectStatementPurchase(tx, ctx, purchase, { detach: true });
+      }
       const result = operation === "DELETE" ? await tx.financeTransaction.deleteMany({ where: { workspaceId: ctx.workspaceId, id: { in: ids } } }) : await tx.financeTransaction.updateMany({ where: { workspaceId: ctx.workspaceId, id: { in: ids }, type: { not: "TRANSFER" } }, data: { categoryId: category?.id || null, revision: { increment: 1 } } });
       await log(tx, ctx, operation === "DELETE" ? "transactions.deleted" : "transactions.categorized", "FinanceTransaction", ids[0], { count: result.count });
       return result;
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     invalidate(); return { success: `${result.count} lançamento(s) ${operation === "DELETE" ? "excluído(s)" : "categorizado(s)"}.` };
   } catch (error) { return failure(error); }
 }
@@ -405,6 +514,109 @@ export async function confirmCardStatements(fd: FormData) {
   } catch (error) { return failure(error); }
 }
 
+const DETAIL_MODES = ["ALREADY_INCLUDED", "ADDED_TO_STATEMENT"] as const;
+const addMonths = (value: Date, months: number) => {
+  const target = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + months, 1));
+  target.setUTCDate(Math.min(value.getUTCDate(), new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate()));
+  return target;
+};
+/** Effective total and detailed sum of a statement, read inside the caller's transaction. */
+async function statementForLink(tx: Prisma.TransactionClient, workspaceId: string, statementId: string, accountId: string, excludeTransactionId?: string) {
+  const statement = await tx.cardStatement.findFirst({ where: { id: statementId, workspaceId, accountId }, select: { id: true, status: true, amountCents: true, dueDate: true, referenceMonth: true } });
+  if (!statement) throw new Error("A fatura escolhida não pertence a este cartão.");
+  const linked = await tx.financeTransaction.findMany({ where: { workspaceId, cardStatementId: statementId, type: "EXPENSE", ...(excludeTransactionId ? { id: { not: excludeTransactionId } } : {}) }, select: { amountCents: true, statementDetailMode: true } });
+  const addedCents = linked.reduce((sum, item) => sum + (item.statementDetailMode === "ADDED_TO_STATEMENT" ? item.amountCents : 0), 0);
+  return { ...statement, totalCents: statement.amountCents + addedCents, detailedCents: linked.reduce((sum, item) => sum + item.amountCents, 0) };
+}
+
+export async function interpretCardExpense(fd: FormData) {
+  try {
+    const ctx = await requirePermission("WRITE");
+    const input = z.string().trim().min(3, "Descreva o gasto, por exemplo: gastei 89,90 no ifood ontem no nubank.").max(500).parse(text(fd, "text"));
+    const [cards, categories] = await Promise.all([
+      prisma.account.findMany({ where: { workspaceId: ctx.workspaceId, type: "CREDIT_CARD", isArchived: false }, select: { id: true, name: true, institution: true, type: true } }),
+      prisma.financeCategory.findMany({ where: { workspaceId: ctx.workspaceId, isArchived: false, type: "EXPENSE" }, select: { id: true, name: true } }),
+    ]);
+    return { draft: await interpretCardExpenseText(input, dayKey(new Date(), ctx.workspace.timezone), cards, categories) };
+  } catch (error) { return failure(error); }
+}
+
+/** Records a card purchase in the ledger and, optionally, details it under one statement: either it
+ * was already inside the declared amount, or it is added on top. It is never counted twice. */
+export async function saveCardExpense(fd: FormData) {
+  try {
+    const ctx = await requirePermission("WRITE");
+    const card = await accountRef(ctx.workspaceId, text(fd, "accountId"));
+    if (!card || card.type !== "CREDIT_CARD") throw new Error("Escolha um cartão de crédito.");
+    const amountCents = cents(fd, "amount");
+    const description = name(fd, "description");
+    const purchaseDate = date(fd, "date");
+    const merchant = optional(fd, "merchant", 200);
+    const category = await categoryRef(ctx.workspaceId, text(fd, "categoryId"));
+    const installments = integer(fd, "installments", 1, 24) ?? 1;
+    if (amountCents < installments) throw new Error("Cada parcela precisa ter pelo menos um centavo.");
+    const link = enumValue(fd, "link", ["NONE", ...DETAIL_MODES], "NONE");
+    const statementId = link === "NONE" ? null : z.string().min(1, "Escolha a fatura.").parse(text(fd, "statementId"));
+    if (statementId && ctx.role !== "OWNER") throw new AuthorizationError("Somente o titular deste espaço pode vincular gastos a faturas.");
+    const base = Math.floor(amountCents / installments);
+    const parts = Array.from({ length: installments }, (_, index) => ({ number: index + 1, amountCents: base + (index === 0 ? amountCents - base * installments : 0), date: addMonths(purchaseDate, index) }));
+    const result = await prisma.$transaction(async tx => {
+      let statement: Awaited<ReturnType<typeof statementForLink>> | null = null;
+      if (statementId && link !== "NONE") {
+        statement = await statementForLink(tx, ctx.workspaceId, statementId, card.id);
+        const error = statementLinkError({ status: statement.status, amountCents: statement.totalCents, detailedCents: statement.detailedCents }, link, parts[0].amountCents);
+        if (error) throw new Error(error);
+      }
+      const ids: string[] = [];
+      for (const part of parts) {
+        const partDescription = installments > 1 ? `${description} (${part.number}/${installments})` : description;
+        const day = part.date.toISOString().slice(0, 10);
+        const row = await tx.financeTransaction.create({ data: {
+          workspaceId: ctx.workspaceId, accountId: card.id, categoryId: category?.id || null, type: "EXPENSE", description: partDescription, merchant,
+          amountCents: part.amountCents, currency: "BRL", date: part.date, installmentNumber: installments > 1 ? part.number : null, installmentTotal: installments > 1 ? installments : null,
+          source: "CARD_QUICK_ADD", fingerprint: transactionFingerprint(ctx.workspaceId, card.id, { date: day, description: partDescription, amountCents: part.amountCents, type: "EXPENSE", externalId: null }),
+          ...(statement && part.number === 1 && link !== "NONE" ? { cardStatementId: statement.id, statementDetailMode: link } : {}),
+        }, select: { id: true } });
+        ids.push(row.id);
+      }
+      const after = statement ? statement.totalCents + (link === "ADDED_TO_STATEMENT" ? parts[0].amountCents : 0) : null;
+      await log(tx, ctx, "finance.card_expense_added", "FinanceTransaction", ids[0], { cardId: card.id, amountCents, installments, statementId: statement?.id ?? null, mode: statement ? link : null, statementTotalBefore: statement?.totalCents ?? null, statementTotalAfter: after });
+      return { ids, statement, after };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    invalidate();
+    const value = (cents: number) => (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    const effect = !result.statement ? "sem vínculo com fatura" : link === "ADDED_TO_STATEMENT" ? `somado à fatura de ${result.statement.dueDate?.toISOString().slice(0, 10) ?? result.statement.referenceMonth}, que passou a ${value(result.after!)}` : `detalhado na fatura de ${result.statement.dueDate?.toISOString().slice(0, 10) ?? result.statement.referenceMonth}, sem mudar o total`;
+    return { success: `Gasto de ${value(amountCents)} lançado em ${card.name}${installments > 1 ? ` em ${installments}x` : ""}, ${effect}.` };
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return { error: "Este gasto já foi lançado (mesma data, descrição e valor)." };
+    return failure(error);
+  }
+}
+
+/** Links, re-classifies or unlinks one card purchase. The statement must be on the purchase's card. */
+export async function updateStatementLink(fd: FormData) {
+  try {
+    const ctx = await statementOwner();
+    const transactionId = text(fd, "transactionId");
+    const statementId = text(fd, "statementId");
+    const mode = statementId ? z.enum(DETAIL_MODES).parse(text(fd, "mode")) : null;
+    await prisma.$transaction(async tx => {
+      const purchase = await tx.financeTransaction.findFirst({ where: { id: transactionId, workspaceId: ctx.workspaceId, type: "EXPENSE" }, select: purchaseSelect });
+      if (!purchase) throw new Error("Gasto não encontrado neste espaço.");
+      if (purchase.cardStatementId !== statementId || purchase.statementDetailMode !== mode) await protectStatementPurchase(tx, ctx, purchase, { detach: true });
+      if (statementId && mode) {
+        const statement = await statementForLink(tx, ctx.workspaceId, statementId, purchase.accountId, purchase.id);
+        const error = statementLinkError({ status: statement.status, amountCents: statement.totalCents, detailedCents: statement.detailedCents }, mode, purchase.amountCents);
+        if (error) throw new Error(error);
+      }
+      await tx.financeTransaction.updateMany({ where: { id: purchase.id, workspaceId: ctx.workspaceId }, data: { cardStatementId: statementId || null, statementDetailMode: mode, revision: { increment: 1 } } });
+      await log(tx, ctx, "finance.card_expense_link_updated", "FinanceTransaction", purchase.id, { statementId: statementId || null, mode });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    invalidate();
+    return { success: !statementId ? "Gasto desvinculado da fatura." : mode === "ADDED_TO_STATEMENT" ? "Gasto somado à fatura." : "Gasto marcado como já incluído na fatura." };
+  } catch (error) { return failure(error); }
+}
+
 export async function resolveCardStatementOverlap(fd: FormData) {
   try {
     const ctx = await statementOwner();
@@ -462,14 +674,17 @@ export async function saveGridTransactions(input: GridTransactionInput[]) {
     if (data.some((row) => !row.amountCents)) throw new Error("Valor zero requer revisão.");
     await prisma.$transaction(async (tx) => {
       const existingIds = data.flatMap((row) => row.id ? [row.id] : []);
-      const owned = await tx.financeTransaction.count({ where: { workspaceId: ctx.workspaceId, id: { in: existingIds }, type: { not: "TRANSFER" } } });
-      if (owned !== existingIds.length) throw new Error("Uma transação editada não está disponível neste workspace.");
+      const owned = new Map((await tx.financeTransaction.findMany({ where: { workspaceId: ctx.workspaceId, id: { in: existingIds }, type: { not: "TRANSFER" } }, select: purchaseSelect })).map((row) => [row.id, row]));
+      if (owned.size !== existingIds.length) throw new Error("Uma transação editada não está disponível neste workspace.");
       let unassignedId:string|null=null;
       for (const row of data) {
         const { id, ...fields } = row;
         if(!fields.accountId){if(!unassignedId)unassignedId=(await ensureUnassignedAccount(tx,ctx.workspaceId)).id;fields.accountId=unassignedId}
         const resolvedFields={...fields,accountId:fields.accountId!};
-        if (id) await tx.financeTransaction.update({ where: { id, workspaceId: ctx.workspaceId }, data: { ...resolvedFields, source: undefined, revision: { increment: 1 } } });
+        if (id) {
+          const linkFields = await protectStatementPurchase(tx, ctx, owned.get(id)!, resolvedFields);
+          await tx.financeTransaction.update({ where: { id, workspaceId: ctx.workspaceId }, data: { ...resolvedFields, ...linkFields, source: undefined, revision: { increment: 1 } } });
+        }
         else await tx.financeTransaction.create({ data: resolvedFields });
       }
       await log(tx, ctx, "transactions.grid_saved", "FinanceTransaction", "batch", { count: data.length, created: data.filter(row => !row.id).length });
@@ -515,7 +730,16 @@ export async function updateTransactionCell(input: z.input<typeof editableCellSc
         data = { accountId: change.value }; break;
       }
     }
-    const updated = await prisma.financeTransaction.updateMany({ where: { id: change.id, workspaceId: ctx.workspaceId }, data: { ...data, revision: { increment: 1 } } });
+    const updated = await prisma.$transaction(async tx => {
+      const latest = await tx.financeTransaction.findFirst({ where: { id: change.id, workspaceId: ctx.workspaceId }, select: purchaseSelect });
+      if (!latest || latest.type === "TRANSFER") throw new Error("O lançamento mudou. Atualize a página.");
+      const linkFields = await protectStatementPurchase(tx, ctx, latest, {
+        ...(typeof data.accountId === "string" ? { accountId: data.accountId } : {}),
+        ...(typeof data.type === "string" ? { type: data.type } : {}),
+        ...(typeof data.amountCents === "number" ? { amountCents: data.amountCents } : {}),
+      });
+      return tx.financeTransaction.updateMany({ where: { id: change.id, workspaceId: ctx.workspaceId }, data: { ...data, ...linkFields, revision: { increment: 1 } } });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     if (!updated.count) throw new Error("O lançamento mudou. Atualize a página.");
     invalidate();
     return { success: "Célula salva." };

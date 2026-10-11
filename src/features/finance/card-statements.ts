@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { CardStatementKind, CardStatementReconciliation, CardStatementStatus } from "@prisma/client";
-import { isDateKey } from "@/lib/dates";
+import { addDays, dateKeyToUTC, formatDay, isDateKey } from "@/lib/dates";
+import { money } from "./money";
 
 /** Card statements are aggregates kept beside the ledger: importing them never creates
  * FinanceTransaction rows. Amounts are integer cents and null always means "not provided". */
@@ -124,12 +125,18 @@ export function parseCardStatementFile(raw: unknown): ParseResult {
 
   const byKey = new Map<string, CardStatementInput>();
   const naturalKeys = new Set<string>();
+  const competences = new Set<string>();
   for (const record of records) {
     if (byKey.has(record.externalKey)) errors.push(`externalKey repetido no arquivo: ${record.externalKey}`);
     byKey.set(record.externalKey, record);
     const natural = `${record.issuerKey}|${record.periodKey}`;
     if (naturalKeys.has(natural)) errors.push(`Mais de um registro de ${record.issuer} para ${record.periodKey}.`);
     naturalKeys.add(natural);
+    if (!record.referenceMonth) continue;
+    // One competence is one bill: it cannot be both a forecast and a statement in the same file.
+    const competence = `${record.issuerKey}|${record.referenceMonth}`;
+    if (competences.has(competence)) errors.push(`A competência ${record.referenceMonth} de ${record.issuer} aparece em mais de um registro.`);
+    competences.add(competence);
   }
   for (const record of records) {
     const target = record.overlapsExternalKey ? byKey.get(record.overlapsExternalKey) : undefined;
@@ -224,9 +231,13 @@ export type ExistingStatement = {
   amountCents: number; dueDate: string | null; closingDate: string | null; closingDay: number | null; referenceMonth: string | null;
   paidAt: string | null; reconciliation: CardStatementReconciliation; overlapsStatementId: string | null;
   sourceRecordType: string; sourceAsOf: string; notes: string | null;
+  /** Card expenses the user added on top of the declared amount (ADDED_TO_STATEMENT links). */
+  addedCents: number;
+  /** All linked expense detail, including amounts already in the declared bill. */
+  detailedCents?: number;
 };
 export type StatementValues = Pick<ExistingStatement, "kind" | "status" | "periodKey" | "amountCents" | "dueDate" | "closingDate" | "closingDay" | "referenceMonth" | "paidAt" | "sourceRecordType" | "sourceAsOf" | "notes">;
-export type PlanAction = "CREATE" | "UPDATE" | "KEEP" | "CONFLICT";
+export type PlanAction = "CREATE" | "UPDATE" | "PROMOTE" | "KEEP" | "CONFLICT";
 export type PlannedOverlap = { targetExternalKey: string; targetExistingId: string | null; reconciliation: CardStatementReconciliation };
 export type PlannedStatement = {
   record: CardStatementInput;
@@ -238,31 +249,46 @@ export type PlannedStatement = {
   changes: string[];
   reason: string | null;
 };
-export type StatementPlan = { items: PlannedStatement[]; errors: string[]; counts: Record<"create" | "update" | "keep" | "conflict", number>; untouchedExisting: number };
+export type StatementPlan = { items: PlannedStatement[]; errors: string[]; counts: Record<"create" | "update" | "promote" | "keep" | "conflict", number>; untouchedExisting: number };
 
 const MATERIAL_FIELDS: [keyof StatementValues, string][] = [
   ["status", "status"], ["amountCents", "valor"], ["dueDate", "vencimento"], ["closingDate", "fechamento"], ["closingDay", "dia de fechamento"],
   ["referenceMonth", "competência"], ["paidAt", "data de pagamento"], ["notes", "observação"], ["sourceRecordType", "tipo de origem"],
 ];
 const RESOLVED: CardStatementReconciliation[] = ["INCLUDED_IN_STATEMENT", "SEPARATE_CHARGE"];
+const STATUS_LABEL: Record<CardStatementStatus, string> = { PAID: "uma fatura paga", OPEN: "uma fatura aberta", FUTURE_KNOWN: "uma fatura futura conhecida", FORECAST: "uma previsão" };
+const describe = (row: ExistingStatement) => `${STATUS_LABEL[row.status]} ${row.dueDate ? `com vencimento ${row.dueDate}` : `de ${row.referenceMonth}`}`;
 
-/** Pure, deterministic diff between the file and the workspace's current statements.
- * Identity is the externalKey or, for files with another as-of date, the card + period. */
+/** Pure, deterministic diff between the file and the workspace's current statements. A record
+ * matches by externalKey, then by card + period (a file with another as-of date) and finally by
+ * card + competence, which promotes a monthly forecast to its known statement in place, keeping
+ * its id. Anything ambiguous is a conflict: nothing is duplicated, deleted or overwritten. */
 export function planCardStatementImport(file: CardStatementFile, resolved: ResolvedIssuer[], existing: ExistingStatement[]): StatementPlan {
   const errors: string[] = [];
   const accountFor = new Map(resolved.map((item) => [item.issuerKey, item.accountId]));
   const byExternalKey = new Map(existing.map((row) => [row.externalKey, row]));
   const byNaturalKey = new Map(existing.map((row) => [`${row.accountId}|${row.periodKey}`, row]));
+  const byCompetence = new Map<string, ExistingStatement[]>();
+  for (const row of existing) {
+    if (!row.referenceMonth) continue;
+    const key = `${row.accountId}|${row.referenceMonth}`;
+    byCompetence.set(key, [...(byCompetence.get(key) || []), row]);
+  }
   const matched = file.records.map((record) => {
     const accountId = accountFor.get(record.issuerKey) ?? null;
+    const competence = accountId && record.referenceMonth ? byCompetence.get(`${accountId}|${record.referenceMonth}`) || [] : [];
     const byKey = byExternalKey.get(record.externalKey);
-    const collision = byKey && (byKey.accountId !== accountId || byKey.periodKey !== record.periodKey);
-    const current = collision ? byKey : byKey ?? (accountId ? byNaturalKey.get(`${accountId}|${record.periodKey}`) : undefined);
-    return { record, accountId, current: current ?? null, collision: Boolean(collision) };
+    const identity = byKey ?? (accountId ? byNaturalKey.get(`${accountId}|${record.periodKey}`) : undefined);
+    if (identity) {
+      const collision = byKey && (byKey.accountId !== accountId || byKey.periodKey !== record.periodKey);
+      return { record, accountId, current: identity, how: collision ? "collision" as const : "identity" as const, others: competence.filter((row) => row.id !== identity.id) };
+    }
+    if (competence.length > 1) return { record, accountId, current: null, how: "ambiguous" as const, others: competence };
+    return { record, accountId, current: competence[0] ?? null, how: competence.length ? "competence" as const : "new" as const, others: [] as ExistingStatement[] };
   });
   const incoming = new Map(matched.map((item) => [item.record.externalKey, item]));
 
-  const items = matched.map(({ record, accountId, current, collision }): PlannedStatement => {
+  const items = matched.map(({ record, accountId, current, how, others }): PlannedStatement => {
     let overlap: PlannedOverlap | null = null;
     if (record.overlapsExternalKey) {
       const inFile = incoming.get(record.overlapsExternalKey);
@@ -281,12 +307,26 @@ export function planCardStatementImport(file: CardStatementFile, resolved: Resol
       sourceRecordType: record.recordType, sourceAsOf: file.asOfDate, notes: record.notes,
     };
     const base = { record, accountId, existingId: current?.id ?? null, overlap, changes: [] as string[] };
+    if (how === "ambiguous") return { ...base, action: "CONFLICT", values: incomingValues, overlap: null, reason: `Há ${others.length} registros salvos na competência ${record.referenceMonth}; concilie antes de importar.` };
     if (!current) return { ...base, action: "CREATE", values: incomingValues, reason: null };
     const kept = { ...base, values: pickValues(current), overlap: null };
-    if (collision) return { ...kept, action: "CONFLICT", reason: "Esta externalKey já identifica outra fatura (cartão ou período diferente)." };
+    if (how === "collision") return { ...kept, action: "CONFLICT", reason: "Esta externalKey já identifica outra fatura (cartão ou período diferente)." };
+    if (others.length) return { ...kept, action: "CONFLICT", reason: `A competência ${record.referenceMonth} já tem ${describe(others[0])}; nada foi alterado. Concilie antes de importar.` };
+    if ((current.detailedCents ?? 0) > record.amountCents + current.addedCents) return { ...kept, action: "CONFLICT", reason: "O novo valor ficaria abaixo dos gastos já detalhados na fatura. Confira os vínculos antes de importar." };
     if (file.asOfDate < current.sourceAsOf) return { ...kept, action: "KEEP", reason: `Já existe versão mais recente (data-base ${current.sourceAsOf}).` };
+    if (how === "competence") {
+      if (record.kind === "MONTHLY_PROJECTION") return { ...kept, action: "CONFLICT", reason: `Já existe ${describe(current)} nesta competência; uma previsão não substitui uma fatura.` };
+      if (current.kind === "STATEMENT") return { ...kept, action: "CONFLICT", reason: `Já existe ${describe(current)} nesta competência; confira o vencimento antes de importar.` };
+      if (current.reconciliation === "INCLUDED_IN_STATEMENT") return { ...kept, action: "CONFLICT", reason: "Você marcou esta previsão como já incluída em outra fatura; o arquivo a trata como fatura própria. Revise antes de promover." };
+      if (current.addedCents) return { ...kept, action: "CONFLICT", reason: `A previsão tem ${money(current.addedCents)} em gastos somados manualmente; confira se o valor do banco já os inclui.` };
+      // The forecast becomes the statement itself: same id, its competence kept, overlap cleared on apply.
+      const values: StatementValues = { ...incomingValues, closingDay: record.closingDay ?? current.closingDay, notes: record.notes ?? current.notes };
+      const changes = ["previsão promovida a fatura conhecida", ...MATERIAL_FIELDS.filter(([field]) => values[field] !== current[field]).map(([, label]) => label)];
+      return { ...base, action: "PROMOTE", values, changes, reason: null };
+    }
     if (STATUS_RANK[record.status] < STATUS_RANK[current.status]) return { ...kept, action: "CONFLICT", reason: `O registro salvo está ${current.status}; a importação não rebaixa para ${record.status}.` };
     if (current.status === "PAID" && record.amountCents !== current.amountCents) return { ...kept, action: "CONFLICT", reason: "Fatura já quitada com valor diferente; o valor confirmado foi preservado." };
+    if (current.addedCents && record.amountCents !== current.amountCents) return { ...kept, action: "CONFLICT", reason: `Esta fatura tem ${money(current.addedCents)} em gastos somados manualmente; confira se o novo valor do banco já os inclui.` };
     // Null in the file means "not provided": it never erases a value already stored.
     const values: StatementValues = {
       ...incomingValues,
@@ -300,7 +340,11 @@ export function planCardStatementImport(file: CardStatementFile, resolved: Resol
   });
   const count = (action: PlanAction) => items.filter((item) => item.action === action).length;
   const touched = new Set(items.map((item) => item.existingId).filter(Boolean));
-  return { items, errors, counts: { create: count("CREATE"), update: count("UPDATE"), keep: count("KEEP"), conflict: count("CONFLICT") }, untouchedExisting: existing.filter((row) => !touched.has(row.id)).length };
+  return {
+    items, errors,
+    counts: { create: count("CREATE"), update: count("UPDATE"), promote: count("PROMOTE"), keep: count("KEEP"), conflict: count("CONFLICT") },
+    untouchedExisting: existing.filter((row) => !touched.has(row.id)).length,
+  };
 }
 
 function pickValues(row: ExistingStatement): StatementValues {
@@ -312,6 +356,12 @@ export type StatementRow = {
   id: string; accountId: string; accountName: string; kind: CardStatementKind; status: CardStatementStatus; amountCents: number;
   dueDate: string | null; closingDate: string | null; closingDay: number | null; referenceMonth: string | null; paidAt: string | null;
   reconciliation: CardStatementReconciliation; overlapsStatementId: string | null; notes: string | null;
+  /** `amountCents` is the bill total: the declared amount plus expenses added on top of it. */
+  declaredCents?: number; addedCents?: number; detailedCents?: number; detailCount?: number;
+};
+export type CardTotals = {
+  accountName: string; openCents: number; openCount: number; overdue: boolean; nextDueDate: string | null; closingDate: string | null; closingDay: number | null;
+  futureKnownCents: number; futureKnownCount: number; paidCents: number; paidCount: number; forecastCents: number;
 };
 
 /** Current debt is only OPEN statements. Paid history, known future statements and forecasts
@@ -325,14 +375,22 @@ export function summarizeCardStatements(rows: StatementRow[], today: string) {
     .sort((a, b) => (a.referenceMonth || "").localeCompare(b.referenceMonth || "") || a.accountName.localeCompare(b.accountName))
     .map((row) => ({ ...row, counted: row.reconciliation === "NOT_REQUIRED" || row.reconciliation === "SEPARATE_CHARGE" }));
   const pending = forecasts.filter((row) => row.reconciliation === "PENDING");
-  const byAccount: Record<string, { openCents: number; overdue: boolean; nextDueDate: string | null; closingDate: string | null; closingDay: number | null }> = {};
-  for (const row of rows) byAccount[row.accountId] ??= { openCents: 0, overdue: false, nextDueDate: null, closingDate: null, closingDay: null };
+  const byAccount: Record<string, CardTotals> = {};
+  const card = (row: StatementRow) => (byAccount[row.accountId] ??= {
+    accountName: row.accountName, openCents: 0, openCount: 0, overdue: false, nextDueDate: null, closingDate: null, closingDay: null,
+    futureKnownCents: 0, futureKnownCount: 0, paidCents: 0, paidCount: 0, forecastCents: 0,
+  });
+  for (const row of rows) card(row);
   for (const row of open) {
-    const account = byAccount[row.accountId];
+    const account = card(row);
     account.openCents += row.amountCents;
+    account.openCount++;
     account.overdue ||= row.overdue;
     if (!account.nextDueDate) Object.assign(account, { nextDueDate: row.dueDate, closingDate: row.closingDate, closingDay: row.closingDay });
   }
+  for (const row of futureKnown) { const account = card(row); account.futureKnownCents += row.amountCents; account.futureKnownCount++; }
+  for (const row of paid) { const account = card(row); account.paidCents += row.amountCents; account.paidCount++; }
+  for (const row of forecasts) if (row.counted) card(row).forecastCents += row.amountCents;
   const months = new Map<string, { month: string; openCents: number; futureKnownCents: number; forecastCents: number; pendingCents: number }>();
   const month = (key: string) => months.get(key) ?? months.set(key, { month: key, openCents: 0, futureKnownCents: 0, forecastCents: 0, pendingCents: 0 }).get(key)!;
   for (const row of open) month((row.dueDate || "").slice(0, 7)).openCents += row.amountCents;
@@ -359,3 +417,106 @@ export function summarizeCardStatements(rows: StatementRow[], today: string) {
   };
 }
 export type CardStatementSummary = ReturnType<typeof summarizeCardStatements>;
+
+const iso = (date: Date) => date.toISOString().slice(0, 10);
+const dayOfMonth = (year: number, month: number, day: number) => new Date(Date.UTC(year, month, Math.min(day, new Date(Date.UTC(year, month + 1, 0)).getUTCDate())));
+export type PurchaseStatement = Pick<StatementRow, "id" | "accountId" | "kind" | "status" | "dueDate" | "closingDate" | "closingDay">;
+
+/** Closing date used to place a purchase. Only a stored closingDate is exact; one derived from the
+ * closing day or from the card's usual closing→due gap is an estimate and is never persisted. */
+export function statementClosing(statement: PurchaseStatement, card: PurchaseStatement[]): { date: string; estimated: boolean } | null {
+  if (statement.kind !== "STATEMENT" || !statement.dueDate) return null;
+  if (statement.closingDate) return { date: statement.closingDate, estimated: false };
+  const due = dateKeyToUTC(statement.dueDate);
+  if (statement.closingDay) {
+    let closing = dayOfMonth(due.getUTCFullYear(), due.getUTCMonth(), statement.closingDay);
+    if (closing >= due) closing = dayOfMonth(due.getUTCFullYear(), due.getUTCMonth() - 1, statement.closingDay);
+    return { date: iso(closing), estimated: true };
+  }
+  const reference = card.find((row) => row.closingDate && row.dueDate);
+  if (!reference) return null;
+  const gap = Math.round((dateKeyToUTC(reference.dueDate!).getTime() - dateKeyToUTC(reference.closingDate!).getTime()) / 86_400_000);
+  return { date: addDays(statement.dueDate, -gap), estimated: true };
+}
+
+export type StatementSuggestion = { statementId: string; dueDate: string; closing: string; estimated: boolean; status: CardStatementStatus };
+/** The bill a purchase lands on: the card's first statement whose closing comes after the purchase.
+ * A purchase on the closing day already belongs to the next bill. */
+export function suggestStatementForPurchase(statements: PurchaseStatement[], accountId: string, purchaseDate: string): StatementSuggestion | null {
+  const card = statements.filter((row) => row.accountId === accountId && row.kind === "STATEMENT" && row.dueDate).sort((a, b) => a.dueDate!.localeCompare(b.dueDate!));
+  let windowStart: string | null = null;
+  for (const statement of card) {
+    const closing = statementClosing(statement, card);
+    if (!closing) continue;
+    const closingDate = dateKeyToUTC(closing.date);
+    const start = windowStart ?? iso(dayOfMonth(closingDate.getUTCFullYear(), closingDate.getUTCMonth() - 1, closingDate.getUTCDate()));
+    if (purchaseDate >= start && purchaseDate < closing.date) return { statementId: statement.id, dueDate: statement.dueDate!, closing: closing.date, estimated: closing.estimated, status: statement.status };
+    windowStart = closing.date;
+  }
+  return null;
+}
+
+export type StatementDetailMode = "ALREADY_INCLUDED" | "ADDED_TO_STATEMENT";
+/** A detailed purchase either already sits inside the bill or is added on top of it. A paid bill
+ * never changes, and the detailed purchases may never add up to more than the bill. */
+export function statementLinkError(statement: { status: CardStatementStatus; amountCents: number; detailedCents: number }, mode: StatementDetailMode, amountCents: number) {
+  if (mode === "ADDED_TO_STATEMENT" && statement.status === "PAID") return "Esta fatura já foi paga e o valor dela não muda. Marque o gasto como já incluído.";
+  const total = statement.amountCents + (mode === "ADDED_TO_STATEMENT" ? amountCents : 0);
+  if (statement.detailedCents + amountCents > total) return `Os gastos detalhados somariam ${money(statement.detailedCents + amountCents)}, acima do total da fatura (${money(total)}). Se a compra não estava na fatura, escolha somar ao valor dela.`;
+  return null;
+}
+
+export type StatementAlert = { id: string; tone: "danger" | "warning" | "info"; title: string; detail: string; href: string };
+const TONE_ORDER = { danger: 0, warning: 1, info: 2 } as const;
+const shortDay = (value: string) => formatDay(value, "pt-BR", { day: "2-digit", month: "2-digit" });
+const monthName = (key: string) => new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric", timeZone: "UTC" }).format(dateKeyToUTC(`${key}-01`));
+
+/** Few, actionable alerts: overdue and imminent bills, pending reconciliation, months that weigh
+ * on the income, concentration in one card and cards whose limit is unknown. */
+export function statementAlerts(summary: CardStatementSummary, context: { today: string; monthlyIncomeCents: number; cardsWithoutLimit: string[] }): StatementAlert[] {
+  const alerts: StatementAlert[] = [];
+  const soon = addDays(context.today, 7);
+  for (const row of summary.open) {
+    if (row.overdue) alerts.push({ id: `overdue-${row.id}`, tone: "danger", title: `${row.accountName}: fatura vencida em ${shortDay(row.dueDate!)}`, detail: `${money(row.amountCents)} continuam em aberto. Confira o pagamento.`, href: `#fatura-${row.id}` });
+    else if (row.dueDate! <= soon) {
+      const days = Math.round((dateKeyToUTC(row.dueDate!).getTime() - dateKeyToUTC(context.today).getTime()) / 86_400_000);
+      alerts.push({ id: `soon-${row.id}`, tone: "warning", title: days ? `${row.accountName} vence em ${days} dia${days > 1 ? "s" : ""}` : `${row.accountName} vence hoje`, detail: `${money(row.amountCents)} em ${shortDay(row.dueDate!)}.`, href: `#fatura-${row.id}` });
+    }
+  }
+  for (const row of summary.pending) alerts.push({ id: `pending-${row.id}`, tone: "warning", title: `Previsão de ${row.accountName} a conciliar`, detail: `${money(row.amountCents)} de ${monthName(row.referenceMonth!)} ficam fora dos totais até você decidir.`, href: `#previsao-${row.id}` });
+  const upcoming = summary.months.filter((item) => item.month >= context.today.slice(0, 7)).map((item) => ({ ...item, total: item.openCents + item.futureKnownCents + item.forecastCents }));
+  if (context.monthlyIncomeCents > 0) {
+    for (const item of upcoming.slice(0, 3)) {
+      const share = Math.round(item.total / context.monthlyIncomeCents * 100);
+      if (item.total * 100 >= context.monthlyIncomeCents * 70) alerts.push({ id: `income-${item.month}`, tone: item.total >= context.monthlyIncomeCents ? "danger" : "warning", title: `Vencimentos de ${monthName(item.month)} somam ${share}% da renda`, detail: `${money(item.total)} em faturas para ${money(context.monthlyIncomeCents)} de renda mensal.`, href: "#vencimentos" });
+    }
+  } else {
+    const peak = [...upcoming].sort((a, b) => b.total - a.total)[0];
+    if (peak && upcoming.length > 1) alerts.push({ id: `peak-${peak.month}`, tone: "info", title: `Mês mais pesado: ${monthName(peak.month)}`, detail: `${money(peak.total)} em vencimentos de cartão. Configure sua renda para comparar.`, href: "#vencimentos" });
+  }
+  const withOpen = Object.values(summary.byAccount).filter((card) => card.openCents > 0).sort((a, b) => b.openCents - a.openCents);
+  if (withOpen.length > 1 && withOpen[0].openCents * 2 >= summary.openCents) {
+    alerts.push({ id: "concentration", tone: "info", title: `${withOpen[0].accountName} concentra ${Math.round(withOpen[0].openCents / summary.openCents * 100)}% da dívida atual`, detail: `${money(withOpen[0].openCents)} de ${money(summary.openCents)} em faturas abertas.`, href: "#composicao" });
+  }
+  if (context.cardsWithoutLimit.length) alerts.push({ id: "limits", tone: "info", title: `${context.cardsWithoutLimit.length} cartão${context.cardsWithoutLimit.length > 1 ? "ões" : ""} sem limite configurado`, detail: `${context.cardsWithoutLimit.join(", ")}: informe o limite para acompanhar o uso.`, href: "/finance/accounts" });
+  return alerts.sort((a, b) => TONE_ORDER[a.tone] - TONE_ORDER[b.tone]).slice(0, 5);
+}
+
+/** Habitual closing and due days read from the registered bills (the most frequent day, so an
+ * exceptional due date does not become the rule). Only a suggestion: the card's recurring cycle
+ * changes when the user confirms it, and the bills keep their own dates. */
+export function cardCycleSuggestion(rows: StatementRow[]) {
+  const bills = rows.filter((row) => row.kind === "STATEMENT" && row.dueDate).sort((a, b) => b.dueDate!.localeCompare(a.dueDate!));
+  if (!bills.length) return null;
+  const mostFrequent = (values: number[]) => {
+    const counts = new Map<number, number>();
+    for (const value of values) counts.set(value, (counts.get(value) || 0) + 1);
+    // Ties go to the most recent bill: values are listed newest first.
+    return values.reduce<number | null>((best, value) => best === null || counts.get(value)! > counts.get(best)! ? value : best, null);
+  };
+  return {
+    closingDay: mostFrequent(bills.flatMap((row) => row.closingDate ? [Number(row.closingDate.slice(8, 10))] : row.closingDay ? [row.closingDay] : [])),
+    dueDay: mostFrequent(bills.map((row) => Number(row.dueDate!.slice(8, 10)))),
+    statements: bills.length,
+  };
+}

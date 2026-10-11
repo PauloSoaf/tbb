@@ -27,6 +27,10 @@ import { FinanceCategoryChart, FinanceDailyCashFlowChart, FinanceIncomeUsageChar
 import { useI18n } from "@/lib/i18n/I18nContext";
 import { NaturalLanguageCapture } from "./NaturalLanguageCapture";
 import { CompactMonthlyIncome } from "./CompactMonthlyIncome";
+import { CreditLimitBreakdown } from "./CreditLimitBreakdown";
+import { InvoiceFundingPanel } from "./InvoiceFundingPanel";
+import { FixedExpensesDialog } from "./FixedExpensesDialog";
+import { AppTooltip } from "@/components/ui/AppTooltip";
 import { FinanceOverviewHeader } from "./FinanceOverviewHeader";
 import { FinanceSectionNav } from "./FinanceSectionNav";
 import { useFinanceCopy } from "./finance-copy";
@@ -47,8 +51,7 @@ export function FinanceOverview({ data, captureAccounts }: { data: FinanceOvervi
   const currency = (cents: number) => new Intl.NumberFormat(language, { style: "currency", currency: "BRL", maximumFractionDigits: cents % 100 ? 2 : 0 }).format(cents / 100);
   const date = (day: string) => new Intl.DateTimeFormat(language, { day: "2-digit", month: "short", timeZone: "UTC" }).format(new Date(`${day}T00:00:00.000Z`)).replace(".", "");
   const metrics = data.metrics;
-  const incomeUse = percent(metrics.expensesCents, metrics.incomeReferenceCents);
-  const balanceDelta = metrics.previousBalanceCents ? Math.round((metrics.balanceCents - metrics.previousBalanceCents) / Math.abs(metrics.previousBalanceCents) * 100) : null;
+  const incomeUse = percent(metrics.committedIncomeCents, metrics.incomeReferenceCents);
   const goalProgress = metrics.savingsTargetCents ? Math.min(100, percent(metrics.totalSavingsCents, metrics.savingsTargetCents)) : 0;
   const daysInMonth = new Date(Number(data.today.slice(0, 4)), Number(data.today.slice(5, 7)), 0).getDate();
   const elapsed = Number(data.today.slice(8, 10));
@@ -56,10 +59,10 @@ export function FinanceOverview({ data, captureAccounts }: { data: FinanceOvervi
 
   const kpis = [
     { label: t("netWorth"), value: metrics.netWorthCents, context: `${data.accounts.filter((account) => !account.unassigned).length} ${t("acrossAccounts")}`, icon: Landmark, tone: "primary" },
-    { label: t("income"), value: metrics.incomeCents, context: t("registeredThisMonth"), icon: ArrowDownLeft, tone: "success" },
-    { label: t("expenses"), value: metrics.expensesCents, context: metrics.incomeReferenceCents ? `${incomeUse}% ${t("spentFromIncome")}` : t("registeredThisMonth"), icon: ArrowUpRight, tone: "danger" },
-    { label: t("balance"), value: metrics.balanceCents, context: balanceDelta === null ? t("newThisMonth") : `${balanceDelta > 0 ? "+" : ""}${balanceDelta}% ${t("comparedPrevious")}`, icon: metrics.balanceCents >= 0 ? TrendingUp : TrendingDown, tone: metrics.balanceCents >= 0 ? "success" : "danger" },
-    { label: t("fixed"), value: metrics.fixedCents, context: `${data.fixedDetails.recurringCount + data.fixedDetails.subscriptionCount} ${t("monthlyCommitments")}`, icon: Repeat2, tone: "warning" },
+    { label: "Receitas recebidas", value: metrics.incomeCents, context: "Recebimentos registrados até hoje neste mês", icon: ArrowDownLeft, tone: "success" },
+    { label: t("expenses"), value: metrics.expensesCents, context: "Despesas registradas até hoje neste mês", icon: ArrowUpRight, tone: "danger" },
+    { label: "Saldo atual em contas", value: metrics.cashBalanceCents, context: `Dinheiro para usar · reservas ${currency(metrics.reserveBalanceCents)} à parte`, icon: metrics.cashBalanceCents >= 0 ? TrendingUp : TrendingDown, tone: metrics.cashBalanceCents >= 0 ? "success" : "danger" },
+    { label: t("fixed"), value: metrics.fixedCents, context: `${data.fixedDetails.recurringCount + data.fixedDetails.subscriptionCount + data.fixedDetails.plannedCount} ${t("monthlyCommitments")}`, icon: Repeat2, tone: "warning" },
     { label: t("invoices"), value: metrics.openInvoicesCents, context: data.cardStatements.openCount ? `${data.cardStatements.openCount} ${t("openStatementsDue")} ${data.cardStatements.dueDates.map(date).join(" · ")}` : `${data.creditCards.length} ${t("dueOnCards")}`, icon: CreditCard, tone: "purple" },
   ];
   const month = (key: string) => new Intl.DateTimeFormat(language, { month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${key}-01T00:00:00.000Z`));
@@ -67,16 +70,17 @@ export function FinanceOverview({ data, captureAccounts }: { data: FinanceOvervi
   const alerts: { id: string; title: string; detail: string; href: string; tone: "warning" | "danger" }[] = [];
   for (const item of data.cardStatements.overdue.slice(0, 2)) alerts.push({ id: `overdue-${item.id}`, title: `${t("overdueStatement")} · ${item.accountName}`, detail: `${date(item.dueDate)} · ${currency(item.amountCents)}`, href: "/finance/statements", tone: "danger" });
   if (!metrics.incomeReferenceCents && metrics.expensesCents) alerts.push({ id: "income", title: t("setIncome"), detail: currency(metrics.expensesCents), href: "#renda", tone: "warning" });
-  else if (metrics.incomeReferenceCents && metrics.expensesCents >= metrics.incomeReferenceCents) alerts.push({ id: "over", title: t("overIncome"), detail: `${incomeUse}% · ${currency(metrics.expensesCents)}`, href: "#captura", tone: "danger" });
+  else if (metrics.incomeReferenceCents && metrics.committedIncomeCents >= metrics.incomeReferenceCents) alerts.push({ id: "over", title: "Compromissos acima da renda prevista", detail: `${incomeUse}% · ${currency(metrics.committedIncomeCents)}`, href: "#analises", tone: "danger" });
   else if (metrics.incomeReferenceCents && incomeUse >= 80) alerts.push({ id: "near", title: t("nearIncome"), detail: `${incomeUse}% · ${currency(metrics.availableCents)}`, href: "#analises", tone: "warning" });
   else if (metrics.incomeReferenceCents && projection > metrics.incomeReferenceCents) alerts.push({ id: "pace", title: t("spendingPace"), detail: currency(projection), href: "#analises", tone: "warning" });
-  for (const card of data.creditCards.filter((item) => item.usage !== null && item.usage >= 80).slice(0, 2)) alerts.push({ id: `card-${card.id}`, title: `${t("cardLimit")} · ${card.name}`, detail: `${card.usage}% · ${currency(card.monthSpentCents)}`, href: "#cartoes", tone: (card.usage || 0) >= 100 ? "danger" : "warning" });
+  // Same bands as the limit bar: the whole known commitment counts, not only the open bill.
+  for (const card of data.creditCards.filter((item) => ["attention", "high", "critical"].includes(item.breakdown.risk)).slice(0, 2)) alerts.push({ id: `card-${card.id}`, title: `${t("cardLimit")} · ${card.name}`, detail: `${Math.round((card.breakdown.committedBasisPoints || 0) / 100)}% · ${currency(card.breakdown.committedCents)}`, href: "#cartoes", tone: card.breakdown.risk === "attention" ? "warning" : "danger" });
   for (const budget of data.budgets.filter((item) => item.usage >= 80).slice(0, 2)) alerts.push({ id: `budget-${budget.id}`, title: `${t("budgetAlert")} · ${budget.category}`, detail: `${budget.usage}% · ${currency(budget.spentCents)} / ${currency(budget.limitCents)}`, href: "/finance/budgets", tone: budget.usage >= 100 ? "danger" : "warning" });
   for (const item of data.cardStatements.pending.slice(0, 1)) alerts.push({ id: `pending-${item.id}`, title: `${t("pendingReconciliation")} · ${item.accountName}`, detail: `${month(item.referenceMonth)} · ${currency(item.amountCents)} · ${t("notSummed")}`, href: "/finance/statements", tone: "warning" });
   for (const item of data.upcoming.slice(0, 2)) alerts.push({ id: item.id, title: `${item.label} ${t("dueSoon")}`, detail: `${date(item.date)} · ${currency(item.amountCents)}`, href: "#pagamentos", tone: "warning" });
 
   return <div className="finance-overview-page">
-    <FinanceOverviewHeader/>
+    <FinanceOverviewHeader canExportReport={data.canExportReport}/>
     <FinanceSectionNav/>
 
     <main id="resumo" className="finance-cockpit">
@@ -89,7 +93,21 @@ export function FinanceOverview({ data, captureAccounts }: { data: FinanceOvervi
         </RevealOnScroll>)}
       </section>
 
-      <RevealOnScroll><CompactMonthlyIncome accounts={captureAccounts} today={data.today} amountCents={data.monthlyIncome.amountCents} accountId={data.monthlyIncome.accountId} accountName={data.monthlyIncome.accountName}/></RevealOnScroll>
+      <RevealOnScroll><CompactMonthlyIncome accounts={captureAccounts.filter((a)=>["CHECKING","CASH","DIGITAL_WALLET"].includes(a.type||""))} today={data.today} {...data.monthlyIncome}/></RevealOnScroll>
+      {data.funding && data.creditCards.length > 0 && <InvoiceFundingPanel funding={data.funding} compact/>}
+
+      <section id="contas" className="finance-accounts-grid">
+        <RevealOnScroll><article className="finance-overview-card finance-account-card">
+          <header className="finance-card-heading"><div><span className="finance-card-icon"><Landmark size={17}/></span><div><h2>{t("accountSummary")}</h2><p>{t("accountHint")}</p></div></div><Link href="/finance/accounts">{t("seeAll")}<ArrowRight size={14}/></Link></header>
+          <div className="finance-account-list">{data.banks.slice(0, 6).map((bank) => <Link href={`/finance/accounts#banco-${bank.id}`} key={bank.id}><span className="finance-account-mark"><WalletCards size={16}/></span><span><strong>{bank.name}</strong><small>{bank.cardCount} cartão(ões) · Reservas {currency(bank.reserveCents)}</small><small>{bank.hasCash ? "Saldo para débito" : "Adicionar saldo da conta →"}</small></span><b data-negative={bank.cashCents < 0 || undefined}>{bank.hasCash ? currency(bank.cashCents) : "Não informado"}</b></Link>)}{!data.banks.length && <EmptyDashboard icon={Landmark} text={t("noCards")} href="/finance/accounts" linkText={t("configure")}/>} {data.accounts.some((account) => account.unassigned) && <Link href="/finance/transactions"><span className="finance-account-mark tone-warning"><AlertTriangle size={16}/></span><span><strong>{t("pendingLink")}</strong><small>{t("transactions")}</small></span><ArrowRight size={15}/></Link>}</div>
+        </article></RevealOnScroll>
+        <RevealOnScroll delay={.05}><article id="cartoes" className="finance-overview-card finance-card-overview">
+          <header className="finance-card-heading"><div><span className="finance-card-icon tone-purple"><CreditCard size={17}/></span><div><h2>{t("cards")}</h2><p>{t("cardsHint")}</p></div></div>{data.creditCards.some((card) => card.statement) && <Link href="/finance/statements">{t("seeStatements")}<ArrowRight size={14}/></Link>}</header>
+          {data.creditCards.length ? <div className="finance-credit-list">{data.creditCards.slice(0, 4).map((card) => <Link href={card.statement ? "/finance/statements" : "/finance/accounts"} key={card.id}><div><span><strong>{card.name}</strong><b>{currency(card.invoiceCents)}</b></span><small>{card.statement
+            ? card.statement.nextDueDate ? `${card.statement.overdue ? `${t("overdueStatement")} · ` : ""}${t("statementDue")} ${date(card.statement.nextDueDate)}${card.statement.closingDate ? ` · ${t("statementCloses")} ${date(card.statement.closingDate)}` : card.statement.closingDay ? ` · ${t("closesDay")} ${card.statement.closingDay}` : ""}` : t("noOpenStatement")
+            : [card.closingDay && `${t("closesDay")} ${card.closingDay}`, card.dueDay && `${t("dueDay")} ${card.dueDay}`].filter(Boolean).join(" · ")}</small></div><CreditLimitBreakdown breakdown={card.breakdown} compact/></Link>)}</div> : <EmptyDashboard icon={CreditCard} text={t("noCards")} href="/finance/accounts" linkText={t("addCard")}/>}
+        </article></RevealOnScroll>
+      </section>
 
       <section id="analises" className="finance-primary-grid">
         <RevealOnScroll className="finance-primary-chart">
@@ -100,14 +118,15 @@ export function FinanceOverview({ data, captureAccounts }: { data: FinanceOvervi
         </RevealOnScroll>
         <RevealOnScroll className="finance-usage-reveal" delay={.06}>
           <article className="finance-overview-card finance-income-usage">
-            <header className="finance-card-heading"><div><span className="finance-card-icon tone-warning"><CircleDollarSign size={17}/></span><div><h2>{t("incomeUsage")}</h2><p>{t("incomeUsageHint")}</p></div></div></header>
+            <header className="finance-card-heading"><div><span className="finance-card-icon tone-warning"><CircleDollarSign size={17}/></span><div><h2>{t("incomeUsage")} <AppTooltip content="Planejamento da renda prevista: gastos fixos mensais e despesas variáveis já registradas. Não soma o total das faturas nem parcelas futuras. Gasolina, cabelo, comida e diarista podem ser previstos mesmo se você pretende pagar no crédito. O que sobra aqui não é o saldo do banco."><button className="icon-button" type="button" aria-label="Como funciona o uso da renda">?</button></AppTooltip></h2><p>Fixos previstos e variáveis registrados em relação à renda prevista.</p></div></div></header>
+            <div className="finance-fixed-shortcut"><FixedExpensesDialog expenses={data.plannedFixed}/></div>
             {metrics.incomeReferenceCents ? <>
-              <div className="income-usage-score" data-danger={incomeUse >= 100 || undefined}><strong>{incomeUse}%</strong><span>{t("incomeUsed")}</span></div>
-              <FinanceIncomeUsageChart fixed={metrics.fixedPaidCents / 100} variable={metrics.variableCents / 100} available={metrics.availableCents / 100} labels={{ fixed: t("fixedLabel"), variable: t("variable"), available: t("available") }}/>
+              <div className="income-usage-score" data-danger={incomeUse >= 100 || undefined}><strong>{incomeUse}%</strong><span>da renda prevista comprometida</span></div>
+              <FinanceIncomeUsageChart fixed={metrics.fixedCents / 100} variable={metrics.variableCents / 100} available={metrics.availableCents / 100} labels={{ fixed: "Fixos previstos", variable: t("variable"), available: "Sobra prevista" }}/>
               <div className="income-usage-breakdown">
-                <span><i data-tone="fixed"/><small>{t("fixedLabel")}</small><strong>{currency(metrics.fixedPaidCents)}</strong></span>
+                <span><i data-tone="fixed"/><small>Fixos previstos</small><strong>{currency(metrics.fixedCents)}</strong></span>
                 <span><i data-tone="variable"/><small>{t("variable")}</small><strong>{currency(metrics.variableCents)}</strong></span>
-                <span><i data-tone="available"/><small>{t("available")}</small><strong>{currency(metrics.availableCents)}</strong></span>
+                <span><i data-tone="available"/><small>Sobra prevista</small><strong>{currency(metrics.availableCents)}</strong></span>
               </div>
             </> : <EmptyDashboard icon={CircleDollarSign} text={t("setIncomeHint")} href="#renda" linkText={t("configure")}/>}
           </article>
@@ -124,19 +143,6 @@ export function FinanceOverview({ data, captureAccounts }: { data: FinanceOvervi
           <div className="finance-savings-value" data-negative={metrics.savingsCents < 0 || undefined}><NumberFlow value={metrics.savingsCents / 100} format={{ style: "currency", currency: "BRL", maximumFractionDigits: 0 }} locales={language}/><span>{metrics.incomeCents ? `${Math.round(metrics.savingsCents / metrics.incomeCents * 100)}%` : "—"}</span></div>
           {metrics.savingsTargetCents ? <div className="finance-goal-progress"><div><span>{currency(metrics.totalSavingsCents)} {t("goalsSaved")}</span><strong>{goalProgress}% {t("goalProgress")}</strong></div><span><i style={{ width: `${goalProgress}%` }}/></span></div> : <div className="finance-goal-empty"><Target size={19}/><span>{t("noGoals")}</span><Link href="/finance/savings">{t("createGoal")}</Link></div>}
           <div className="finance-savings-comparison"><span>{t("previousMonth")}</span><strong>{currency(metrics.previousBalanceCents)}</strong></div>
-        </article></RevealOnScroll>
-      </section>
-
-      <section id="contas" className="finance-accounts-grid">
-        <RevealOnScroll><article className="finance-overview-card finance-account-card">
-          <header className="finance-card-heading"><div><span className="finance-card-icon"><Landmark size={17}/></span><div><h2>{t("accountSummary")}</h2><p>{t("accountHint")}</p></div></div><Link href="/finance/accounts">{t("seeAll")}<ArrowRight size={14}/></Link></header>
-          <div className="finance-account-list">{data.accounts.filter((account) => !account.unassigned && account.type !== "CREDIT_CARD").slice(0, 6).map((account) => <Link href="/finance/accounts" key={account.id}><span className="finance-account-mark"><WalletCards size={16}/></span><span><strong>{account.name}</strong><small>{account.institution || account.type.replaceAll("_", " ")}</small></span><b data-negative={account.balanceCents < 0 || undefined}>{currency(account.balanceCents)}</b></Link>)}{data.accounts.some((account) => account.unassigned) && <Link href="/finance/transactions"><span className="finance-account-mark tone-warning"><AlertTriangle size={16}/></span><span><strong>{t("pendingLink")}</strong><small>{t("transactions")}</small></span><ArrowRight size={15}/></Link>}</div>
-        </article></RevealOnScroll>
-        <RevealOnScroll delay={.05}><article id="cartoes" className="finance-overview-card finance-card-overview">
-          <header className="finance-card-heading"><div><span className="finance-card-icon tone-purple"><CreditCard size={17}/></span><div><h2>{t("cards")}</h2><p>{t("cardsHint")}</p></div></div>{data.creditCards.some((card) => card.statement) && <Link href="/finance/statements">{t("seeStatements")}<ArrowRight size={14}/></Link>}</header>
-          {data.creditCards.length ? <div className="finance-credit-list">{data.creditCards.slice(0, 4).map((card) => <Link href={card.statement ? "/finance/statements" : "/finance/accounts"} key={card.id}><div><span><strong>{card.name}</strong><b>{currency(card.invoiceCents)}</b></span><small>{card.statement
-            ? card.statement.nextDueDate ? `${card.statement.overdue ? `${t("overdueStatement")} · ` : ""}${t("statementDue")} ${date(card.statement.nextDueDate)}${card.statement.closingDate ? ` · ${t("statementCloses")} ${date(card.statement.closingDate)}` : card.statement.closingDay ? ` · ${t("closesDay")} ${card.statement.closingDay}` : ""}` : t("noOpenStatement")
-            : <>{card.usage === null ? t("limitMissing") : `${card.usage}% ${t("used")}`} {card.closingDay ? `· ${t("closesDay")} ${card.closingDay}` : ""} {card.dueDay ? `· ${t("dueDay")} ${card.dueDay}` : ""}</>}</small></div><span className="finance-credit-progress" data-danger={(card.usage || 0) >= 90 || card.statement?.overdue || undefined}><i style={{ width: `${Math.min(100, card.usage || 0)}%` }}/></span></Link>)}</div> : <EmptyDashboard icon={CreditCard} text={t("noCards")} href="/finance/accounts" linkText={t("addCard")}/>}
         </article></RevealOnScroll>
       </section>
 

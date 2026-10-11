@@ -279,3 +279,23 @@ export function InvestmentIncomeChart({ data }: { data: { month: string; income:
     <ChartTooltip showDatePill={false} rows={(point) => [{ label: "Rendimentos", value: formatCurrency(point.income), color: "var(--success)" }]}/>
   </BarChart>;
 }
+
+export type CardStatementMonthPoint = { month: string; open: number; future: number; forecast: number; pending: number };
+/** Card commitments by due month (competence month for forecasts), in the limit bar's colors.
+ * Amounts pending reconciliation are listed in the tooltip but never stacked into a total. */
+export function CardStatementTimelineChart({ data }: { data: CardStatementMonthPoint[] }) {
+  const chartData = useMemo(() => data.map((item) => ({ ...item, label: `${monthLabel(item.month)}/${item.month.slice(2, 4)}` })), [data]);
+  return <BarChart data={chartData} xDataKey="label" stacked aspectRatio="2.4 / 1" margin={{ left: 24, right: 18, top: 22, bottom: 36 }} barGap={0.32}>
+    <Grid horizontal hideHorizontalEdgeLines/>
+    <Bar dataKey="open" fill="var(--credit-open)" lineCap={4}/>
+    <Bar dataKey="future" fill="var(--credit-future)" lineCap={4}/>
+    <Bar dataKey="forecast" fill="var(--chart-5)" lineCap={4}/>
+    <BarXAxis showAllLabels/>
+    <ChartTooltip showDatePill={false} rows={(point) => [
+      { label: "Abertas", value: formatCurrency(point.open), color: "var(--credit-open)" },
+      { label: "Futuras conhecidas", value: formatCurrency(point.future), color: "var(--credit-future)" },
+      { label: "Previsões", value: formatCurrency(point.forecast), color: "var(--chart-5)" },
+      ...(asNumber(point.pending) ? [{ label: "A conciliar (fora do total)", value: formatCurrency(point.pending), color: "var(--muted-foreground)" }] : []),
+    ]}/>
+  </BarChart>;
+}

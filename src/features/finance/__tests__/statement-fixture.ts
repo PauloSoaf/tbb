@@ -49,3 +49,14 @@ export function syntheticStatementFile(asOfDate = AS_OF, keyPrefix = "test") {
     records: records as Overrides[],
   };
 }
+
+/** Corrected synthetic import: each of the seven forecasts now has a known due date. */
+export function syntheticKnownStatementFile() {
+  const file = syntheticStatementFile();
+  file.records = file.records.map(record => record.recordType !== "FUTURE_MONTHLY_PROJECTION" ? record : {
+    ...record, externalKey: `known:${record.referenceMonth}`, recordType: "FUTURE_STATEMENT", paymentStatus: "FUTURE_KNOWN",
+    dueDate: `${record.referenceMonth}-07`, potentialOverlapKey: null,
+  });
+  file.summary.counts = { PAST_STATEMENT: 12, CURRENT_STATEMENT: 3, FUTURE_STATEMENT: 12, FUTURE_MONTHLY_PROJECTION: 0 };
+  return file;
+}

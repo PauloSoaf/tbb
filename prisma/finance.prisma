@@ -18,6 +18,7 @@ enum TransactionType {
 }
 
 model Account {
+  incomePlans FinancePlan[]
   id String @id @default(cuid())
   workspaceId String
   name String
@@ -93,7 +94,9 @@ model CardStatement {
   account Account @relation(fields: [accountId, workspaceId], references: [id, workspaceId])
   overlapsStatement CardStatement? @relation("CardStatementOverlap", fields: [overlapsStatementId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
   overlappedBy CardStatement[] @relation("CardStatementOverlap")
+  transactions FinanceTransaction[]
   @@unique([id, workspaceId])
+  @@unique([id, accountId, workspaceId])
   @@unique([workspaceId, externalKey])
   @@unique([workspaceId, accountId, periodKey])
   @@index([workspaceId, status, dueDate])
@@ -144,11 +147,15 @@ model FinanceTransaction {
   externalId String?
   fingerprint String?
   importBatchId String?
+  cardStatementId String?
+  statementDetailMode StatementDetailMode?
   revision Int @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   account Account @relation("OriginAccount", fields: [accountId], references: [id])
+  // Same workspace and same card as the statement, enforced by the composite key.
+  cardStatement CardStatement? @relation(fields: [cardStatementId, accountId, workspaceId], references: [id, accountId, workspaceId], onDelete: NoAction, onUpdate: NoAction)
   destinationAccount Account? @relation("DestinationAccount", fields: [destinationAccountId], references: [id])
   category FinanceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   importBatch ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
@@ -158,6 +165,14 @@ model FinanceTransaction {
   @@index([workspaceId, date])
   @@index([workspaceId, accountId, date])
   @@index([workspaceId, importBatchId])
+  @@index([workspaceId, cardStatementId])
+}
+
+// How a card purchase relates to the statement it is detailed under: already part of the
+// declared amount, or added on top of it. Either way it is never counted twice.
+enum StatementDetailMode {
+  ALREADY_INCLUDED
+  ADDED_TO_STATEMENT
 }
 
 model Budget {
@@ -766,4 +781,30 @@ model InvestmentMonthlyReview {
   updatedAt DateTime @updatedAt
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   @@unique([workspaceId, month])
+}
+
+// Planning never posts income or expenses to the account ledger.
+model FinancePlan {
+  workspaceId String @id
+  incomeCents Int @default(0)
+  payDay Int?
+  receivingAccountId String?
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  receivingAccount Account? @relation(fields: [receivingAccountId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  @@index([receivingAccountId, workspaceId])
+}
+
+model FixedExpense {
+  id String @id @default(cuid())
+  workspaceId String
+  name String
+  amountCents Int
+  dueDay Int?
+  notes String?
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, isActive])
 }
