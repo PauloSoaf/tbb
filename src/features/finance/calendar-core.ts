@@ -46,6 +46,19 @@ export function calendarMonthDays(month: string): string[] {
   return Array.from({ length: count }, (_, i) => new Date(first.getTime() + i * 86400000).toISOString().slice(0, 10));
 }
 
+/** Only days belonging to the requested month, useful for the compact horizontal day strip. */
+export function calendarMonthDaysOnly(month: string): string[] {
+  return calendarMonthDays(month).filter(day => day.startsWith(`${month}-`));
+}
+
+/** Shared validation for deep links, browser history and adjacent-day navigation. */
+export function calendarSelection(month: string | null | undefined, day: string | null | undefined, today: string) {
+  const validMonth = typeof month === "string" && isMonthKey(month) && month !== "9998-12" ? month : today.slice(0, 7);
+  const validDay = typeof day === "string" && isDateKey(day) && day.startsWith(`${validMonth}-`)
+    ? day : today.startsWith(`${validMonth}-`) ? today : `${validMonth}-01`;
+  return { month: validMonth, day: validDay };
+}
+
 /** Actual ledger totals. Transfers and adjustments are visible but excluded from spending/income. */
 export function calendarDayTotals(entries: FinanceCalendarEntry[], today?: string): Record<string, DayAmounts> {
   const totals: Record<string, DayAmounts> = {};

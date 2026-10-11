@@ -1,7 +1,19 @@
 import "server-only";
 import { dateKeyToUTC } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
+import { AuthorizationError, requirePermission } from "@/lib/workspace";
 import { isMonthKey, shiftMonth, type FinanceCalendarMonth } from "./calendar-core";
+
+/** A READ-only member may browse the calendar but may not be shown mutation controls. */
+export async function financeCalendarCanWrite(): Promise<boolean> {
+  try {
+    await requirePermission("WRITE");
+    return true;
+  } catch (error) {
+    if (error instanceof AuthorizationError) return false;
+    throw error;
+  }
+}
 
 /** Reads only this workspace's ledger. A declared card-statement total is never a second expense. */
 export async function financeCalendarMonth(workspaceId: string, month: string, showStatementLinks = false): Promise<FinanceCalendarMonth> {

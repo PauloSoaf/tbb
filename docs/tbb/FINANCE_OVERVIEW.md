@@ -25,11 +25,19 @@ Corrigir fatura abre um formulário no card e nas tabelas para editar vencimento
 
 ## Calendário financeiro
 
-O calendário compacto na visão geral tem uma página completa em `/finance/calendar`, com navegação entre meses, seleção de datas, gestos horizontais e preferência por movimento reduzido. O cabeçalho permite escolher um mês; o link da versão compacta preserva o mês e o dia selecionados. Textos e datas seguem PT, EN ou ES.
+O calendário compacto da visão geral mostra apenas os dias do mês em uma faixa horizontal com scroll snap. A seleção inicial é hoje, e a lista diária começa recolhida. Selecionar um dia abre detalhes, que podem ser fechados. Valores de saídas e indicadores de entradas, saídas e registros futuros aparecem em cada dia. A faixa respeita movimento reduzido e permite uso por toque e teclado. Ela não altera os parâmetros da visão geral; Tela completa preserva mês e dia selecionados.
+
+A página `/finance/calendar` mantém a grade mensal de sete colunas, navegação contínua e gestos horizontais para trocar meses. Os parâmetros `month` e `day` acompanham a seleção usando a History API integrada ao Next.js, permitindo links diretos e Voltar/Avançar do navegador sem recarregar a página. Parâmetros inválidos usam uma seleção válida. Textos e datas seguem PT, EN ou ES.
+
+Dias de meses adjacentes são atalhos de navegação com indicação neutra, sem valores ou anúncio de ausência de gastos. Ao selecioná-los, o calendário consulta o mês correspondente e preserva o dia. Carregamento e falha de rede também não aparecem como totais zerados; Tentar novamente inicia uma nova consulta.
 
 A consulta lê somente os lançamentos do workspace da sessão, usando um intervalo UTC de início inclusivo e fim exclusivo por mês. Faturas consolidadas não entram como uma segunda despesa. Referências `QUICK_INCOME` não são recebimentos. Transferências e ajustes aparecem na lista, mas ficam fora dos totais de entradas e saídas. Reembolsos contam como entradas; lançamentos posteriores a hoje são identificados como agendados e ficam separados do resultado registrado.
 
-Ao selecionar um dia, aparecem compras, receitas e reembolsos. Os botões Despesa e Receita preenchem essa data no cadastro rápido. Gasto no cartão abre o fluxo existente de faturas, também com a data selecionada e a escolha entre valor já incluído e valor a somar. A lista e os totais são atualizados após salvar.
+Ao selecionar um dia, aparecem compras, receitas e reembolsos. Os botões Despesa e Receita preenchem essa data no cadastro rápido. Gasto no cartão abre o fluxo existente de faturas, também com a data selecionada e a escolha entre valor já incluído e valor a somar. A lista e os totais são atualizados após salvar, inclusive quando a data pertence a outro mês. Os controles e formulários exigem permissão efetiva `WRITE`, calculada pela política existente com overrides de papel e membro; o servidor continua validando cada ação.
+
+O cache local guarda até doze meses por snapshot recebido do servidor. Uma nova resposta de `router.refresh()` invalida os meses anteriores, mesmo quando uma edição, exclusão ou importação ocorreu fora do mês inicial. Cadastros do calendário e do fluxo de cartão descartam o cache após salvar. Recuperar foco ou visibilidade revalida os dados do servidor, com deduplicação dos dois eventos. Selecionar outro dia do mesmo mês não faz uma consulta adicional.
+
+O titular vê uma explicação quando existem valores de faturas sem compras detalhadas, com atalho para o fluxo existente em Faturas. Esses valores não são distribuídos entre dias nem viram lançamentos artificiais.
 
 `GET /api/finance/calendar?month=AAAA-MM` exige sessão e permissão `READ`, valida o mês e responde com cache privado desabilitado. Não aceita workspace fornecido pelo cliente. Identificadores de faturas e o fluxo de compras vinculadas ficam restritos ao titular. O calendário é de lançamentos registrados; previsões de faturas e renda mensal continuam em seus blocos específicos.
 
@@ -63,8 +71,16 @@ As regras de dados estão em [DATA_MODEL.md](DATA_MODEL.md), e a importação em
 
 Contas, faturas e planejamento usam as migrations de vínculo de compras a faturas, planejamento financeiro e índice da conta de recebimento. Em ambientes existentes, aplicar com `npm run prisma:deploy` antes de iniciar a aplicação atualizada. O calendário e a correção de faturas usam os modelos existentes e não acrescentam migrations. Backups, exportações pessoais e arquivos de QA devem permanecer fora do Git; testes usam dados sintéticos.
 
-## Validação da entrega de 11/10/2026
+## Validação da integração inicial de 11/10/2026
 
 Build de produção, typecheck e lint dos arquivos alterados passaram. A suíte passou em 334 de 335 testes; a falha restante é a comparação de caminho POSIX no teste de storage no Windows, já existente. O lint completo mantém quatro erros e um aviso antigos fora dos arquivos desta entrega.
 
 Foram aprovadas 39 verificações no Chrome: 34 em desenvolvimento e cinco na versão de produção. A conferência cobriu desktop e celular de 390 px, temas claro e escuro, traduções, navegação, correção de faturas, cadastro com a data selecionada, compra vinculada no crédito, atualização do mês carregado e limites do gráfico. As verificações finais não registraram erros de runtime ou hidratação. Os testes com gravação usaram um banco descartável com dados sintéticos, removido após a validação.
+
+## Validação do hotfix do calendário de 11/10/2026
+
+Typecheck, build de produção e lint dos arquivos alterados passaram. Os 37 testes do calendário passaram; a suíte completa passou em 356 de 357 testes, mantendo apenas a falha de caminhos POSIX no Windows já descrita acima. O lint geral mantém os mesmos quatro erros e um aviso anteriores fora do escopo.
+
+Foram aprovadas 87 verificações no Chrome contra o build de produção, com dados sintéticos em banco descartável. A conferência incluiu as larguras de 320, 375, 768 e 1440 px nos temas claro e escuro, detalhes expansíveis, teclado, toque, movimento reduzido, PT/EN/ES, links diretos, histórico, dias adjacentes, retry após falha de rede, cadastros em meses carregados e atualização após criação, edição e exclusão externa. Permissões com overrides e privacidade dos identificadores de faturas também foram conferidas. Não houve erros de runtime ou hidratação.
+
+A faixa de dias manteve o conteúdo abaixo de 130 px de altura. A revisão das imagens levou a dois ajustes de responsividade no CSS global: espaçamento do cabeçalho em telas estreitas e organização da faixa de renda para evitar overflow e sobreposição de botões. Os dados reais foram conferidos somente por leitura e permaneceram preservados.

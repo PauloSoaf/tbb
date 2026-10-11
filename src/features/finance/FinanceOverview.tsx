@@ -46,7 +46,7 @@ function percent(value: number, total: number) {
   return total > 0 ? Math.round(value / total * 100) : 0;
 }
 
-export function FinanceOverview({ data, captureAccounts, calendar, calendarCategories }: { data: FinanceOverviewData; captureAccounts: CaptureAccount[]; calendar: FinanceCalendarMonth; calendarCategories: FinanceCalendarCategory[] }) {
+export function FinanceOverview({ data, captureAccounts, calendar, calendarCategories, calendarCanWrite }: { data: FinanceOverviewData; captureAccounts: CaptureAccount[]; calendar: FinanceCalendarMonth; calendarCategories: FinanceCalendarCategory[]; calendarCanWrite: boolean }) {
   const t = useFinanceCopy();
   const { locale } = useI18n();
   const language = localeCode[locale];
@@ -95,7 +95,7 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
         </RevealOnScroll>)}
       </section>
 
-      <RevealOnScroll><FinanceSpendingCalendar compact initialMonth={calendar} today={data.today} accounts={captureAccounts} categories={calendarCategories} statements={data.calendarStatements} canManageCards={data.canExportReport}/></RevealOnScroll>
+      <RevealOnScroll><FinanceSpendingCalendar compact initialMonth={calendar} today={data.today} accounts={captureAccounts} categories={calendarCategories} statements={data.calendarStatements} canWrite={calendarCanWrite} canManageCards={data.canExportReport}/></RevealOnScroll>
       <RevealOnScroll><CompactMonthlyIncome accounts={captureAccounts.filter((a)=>["CHECKING","CASH","DIGITAL_WALLET"].includes(a.type||""))} today={data.today} {...data.monthlyIncome}/></RevealOnScroll>
       {data.funding && data.creditCards.length > 0 && <InvoiceFundingPanel funding={data.funding} compact/>}
 

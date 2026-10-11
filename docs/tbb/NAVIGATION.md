@@ -6,6 +6,8 @@ Detalhes de hábito e candidatura passam o título amigável já carregado pela 
 
 O botão Voltar usa uma pilha por aba em sessionStorage, com no máximo cinquenta URLs internas. A URL inclui a query, preservando filtros ao voltar. Refresh não repete a última visita; retornar a uma página anterior consome a pilha para evitar ciclos. Acesso direto ou storage indisponível usa o pai do registro. JSON inválido é descartado, e destinos externos, URLs iniciadas em `//` ou contendo barras invertidas são ignorados. O aplicativo não chama `history.back()`.
 
+No calendário financeiro completo, mês e dia acompanham `month` e `day` na URL. A navegação usa `pushState`/`replaceState`, integrados ao `useSearchParams` do Next.js, preservando outros parâmetros e o hash. A seleção é derivada dos parâmetros validados, incluindo no retorno pelo histórico do navegador. O calendário compacto tem seleção local independente e leva essa seleção somente no link para a página completa.
+
 `AppNavigationBar` fica acima do conteúdo e fora da topbar com autohide, mantendo Voltar e breadcrumb acessíveis mesmo quando a topbar está recolhida. No mobile, a trilha oculta ancestrais intermediários e trunca rótulos para caber na largura disponível. O título da página continua visível no conteúdo.
 
 A sidebar retraída é um rail de 72px com ícones centrados, grupos separados e nomes acessíveis. Tooltips aparecem por hover ou foco; o botão de painel alterna explicitamente entre retraída e expandida. Passar o mouse no rail não expande o menu. A preferência fica no localStorage; no mobile, o botão de menu abre a navegação em um painel próprio.

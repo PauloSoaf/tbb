@@ -1,11 +1,11 @@
 import { FinanceOverview } from "@/features/finance/FinanceOverview";
 import { PartnerFinanceSummary, type FinanceScopeMetrics } from "@/features/finance/PartnerFinanceSummary";
 import { financeOverview } from "@/features/finance/overview-query";
-import { financeCalendarMonth, financeCalendarOptions } from "@/features/finance/calendar-query";
+import { financeCalendarMonth, financeCalendarOptions, financeCalendarCanWrite } from "@/features/finance/calendar-query";
 import { EmptyState, PageHeader } from "@/components/ui/PageHeader";
 import { dayKey } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceContext, getPartnerContext } from "@/lib/workspace";
+import { getWorkspaceContext, getPartnerContext, requirePermission } from "@/lib/workspace";
 
 function toScopeMetrics(overview: Awaited<ReturnType<typeof financeOverview>>): FinanceScopeMetrics {
   return { netWorthCents: overview.metrics.netWorthCents, incomeCents: overview.metrics.incomeCents, expensesCents: overview.metrics.expensesCents, balanceCents: overview.metrics.balanceCents };
@@ -44,11 +44,13 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
     </div>;
   }
 
-  const [overview, calendar, calendarOptions] = await Promise.all([
+  await requirePermission("READ");
+  const [overview, calendar, calendarOptions, canWrite] = await Promise.all([
     financeOverview(context.workspaceId, today, { statementViewer: context }),
     financeCalendarMonth(context.workspaceId, today.slice(0, 7), context.role === "OWNER"),
     financeCalendarOptions(context.workspaceId),
+    financeCalendarCanWrite(),
   ]);
   const captureAccounts = overview.accounts.filter((account) => !account.unassigned).map(({ id, name, institution, type }) => ({ id, name, institution, type }));
-  return <FinanceOverview key={context.workspaceId} data={overview} captureAccounts={captureAccounts} calendar={calendar} calendarCategories={calendarOptions.categories}/>;
+  return <FinanceOverview key={context.workspaceId} data={overview} captureAccounts={captureAccounts} calendar={calendar} calendarCategories={calendarOptions.categories} calendarCanWrite={canWrite}/>;
 }
