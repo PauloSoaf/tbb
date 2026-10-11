@@ -56,7 +56,7 @@ export function AccountForm({ account, statement, cycle, defaults }: { account?:
         <div><dt>Vencimento</dt><dd>{day(statement.dueDate)}</dd></div>
         <div><dt>Status</dt><dd><span className="statement-chip" data-tone={statement.overdue ? "danger" : "open"}>{statement.overdue ? "Vencida" : "Aberta"}</span></dd></div>
       </dl>
-      <small className="muted">Datas desta fatura vêm do registro importado e não mudam ao editar o cartão. <Link href={`/finance/statements#fatura-${statement.id}`}>Ver fatura completa</Link></small>
+      <small className="muted">Datas desta fatura vêm do registro importado e não mudam ao editar o cartão. <Link href={`/finance/statements#fatura-${statement.id}`}>Ver e corrigir fatura</Link></small>
     </section>}
     {isCard && <details className="account-form-advanced"><summary>Ajuste avançado</summary>
       <label>Saldo inicial da fatura<input name="initialBalance" inputMode="decimal" defaultValue={moneyValue(account?.initialBalanceCents ?? 0)} required/></label>

@@ -285,7 +285,7 @@ export type CardStatementMonthPoint = { month: string; open: number; future: num
  * Amounts pending reconciliation are listed in the tooltip but never stacked into a total. */
 export function CardStatementTimelineChart({ data }: { data: CardStatementMonthPoint[] }) {
   const chartData = useMemo(() => data.map((item) => ({ ...item, label: `${monthLabel(item.month)}/${item.month.slice(2, 4)}` })), [data]);
-  return <BarChart data={chartData} xDataKey="label" stacked aspectRatio="2.4 / 1" margin={{ left: 24, right: 18, top: 22, bottom: 36 }} barGap={0.32}>
+  return <BarChart data={chartData} xDataKey="label" stacked className="statement-timeline-chart" aspectRatio="2.4 / 1" margin={{ left: 24, right: 18, top: 22, bottom: 36 }} barGap={0.32}>
     <Grid horizontal hideHorizontalEdgeLines/>
     <Bar dataKey="open" fill="var(--credit-open)" lineCap={4}/>
     <Bar dataKey="future" fill="var(--credit-future)" lineCap={4}/>

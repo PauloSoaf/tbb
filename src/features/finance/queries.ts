@@ -20,7 +20,7 @@ export async function cardStatementRows(viewer: StatementViewer): Promise<Statem
   const [rows, linked] = await Promise.all([
     prisma.cardStatement.findMany({
       where: { workspaceId: viewer.workspaceId },
-      select: { id: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, closingDate: true, closingDay: true, referenceMonth: true, paidAt: true, reconciliation: true, overlapsStatementId: true, notes: true, account: { select: { name: true } } },
+      select: { id: true, updatedAt: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, closingDate: true, closingDay: true, referenceMonth: true, paidAt: true, reconciliation: true, overlapsStatementId: true, notes: true, account: { select: { name: true } } },
     }),
     prisma.financeTransaction.findMany({
       where: { workspaceId: viewer.workspaceId, cardStatementId: { not: null }, type: "EXPENSE" },
@@ -35,10 +35,10 @@ export async function cardStatementRows(viewer: StatementViewer): Promise<Statem
     if (item.statementDetailMode === "ADDED_TO_STATEMENT") current.addedCents += item.amountCents;
     detail.set(item.cardStatementId!, current);
   }
-  return rows.map(({ account, ...row }) => {
+  return rows.map(({ account, updatedAt, ...row }) => {
     const extra = detail.get(row.id) ?? { addedCents: 0, detailedCents: 0, detailCount: 0 };
     return {
-      ...row, ...extra, accountName: account.name, dueDate: dayOf(row.dueDate), closingDate: dayOf(row.closingDate), paidAt: dayOf(row.paidAt),
+      ...row, ...extra, version: updatedAt?.toISOString() || "", accountName: account.name, dueDate: dayOf(row.dueDate), closingDate: dayOf(row.closingDate), paidAt: dayOf(row.paidAt),
       amountCents: row.amountCents + extra.addedCents, declaredCents: row.amountCents,
     };
   });

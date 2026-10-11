@@ -265,6 +265,7 @@ export async function financeOverview(workspaceId: string, today: string, option
   return {
     today,
     canExportReport: statementViewer?.role === "OWNER",
+    calendarStatements: statementRows.map(({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents }) => ({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents: detailedCents ?? 0 })),
     metrics: {
       netWorthCents,
       incomeCents: current.incomeCents,

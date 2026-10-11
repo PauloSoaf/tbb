@@ -301,17 +301,20 @@ const ChartCore = memo(function ChartCore({
       resolveDomain: (dataKeys) => {
         let max = 0;
         for (const d of data) {
+          let sum = 0;
           for (const key of dataKeys) {
             const value = d[key];
             if (typeof value === "number" && value > max) {
               max = value;
             }
+            if (typeof value === "number") sum += value;
           }
+          if (stacked && sum > max) max = sum;
         }
         return [0, (max || 100) * 1.1];
       },
     });
-  }, [data, innerHeight, isHorizontal, lines, valueScale]);
+  }, [data, innerHeight, isHorizontal, lines, stacked, valueScale]);
 
   const primaryYScale = getPrimaryYScale(yScales, valueScale);
 

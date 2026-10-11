@@ -13,6 +13,7 @@ vi.mock("@/lib/workspace",()=>({getWorkspaceContext:mocks.context}));
 vi.mock("@/components/TbbCharts",()=>({CardStatementTimelineChart:()=>null}));
 vi.mock("@/components/ui/ActionForm",()=>({ActionForm:()=>null}));
 vi.mock("../CardExpenseDialog",()=>({CardExpenseButton:()=>null,CardExpenseDialog:()=>null}));
+vi.mock("../StatementCorrectionDialog",()=>({StatementCorrectionDialog:()=>null}));
 vi.mock("../CardStatementImport",()=>({CardStatementImport:()=>null}));
 vi.mock("../CreditLimitBreakdown",()=>({CreditLimitBreakdown:()=>null}));
 vi.mock("../actions",()=>({resolveCardStatementOverlap:vi.fn(),updateStatementLink:vi.fn()}));

@@ -1,6 +1,7 @@
 import { FinanceOverview } from "@/features/finance/FinanceOverview";
 import { PartnerFinanceSummary, type FinanceScopeMetrics } from "@/features/finance/PartnerFinanceSummary";
 import { financeOverview } from "@/features/finance/overview-query";
+import { financeCalendarMonth, financeCalendarOptions } from "@/features/finance/calendar-query";
 import { EmptyState, PageHeader } from "@/components/ui/PageHeader";
 import { dayKey } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
@@ -43,7 +44,11 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
     </div>;
   }
 
-  const overview = await financeOverview(context.workspaceId, today, { statementViewer: context });
+  const [overview, calendar, calendarOptions] = await Promise.all([
+    financeOverview(context.workspaceId, today, { statementViewer: context }),
+    financeCalendarMonth(context.workspaceId, today.slice(0, 7), context.role === "OWNER"),
+    financeCalendarOptions(context.workspaceId),
+  ]);
   const captureAccounts = overview.accounts.filter((account) => !account.unassigned).map(({ id, name, institution, type }) => ({ id, name, institution, type }));
-  return <FinanceOverview data={overview} captureAccounts={captureAccounts}/>;
+  return <FinanceOverview key={context.workspaceId} data={overview} captureAccounts={captureAccounts} calendar={calendar} calendarCategories={calendarOptions.categories}/>;
 }

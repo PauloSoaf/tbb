@@ -357,7 +357,7 @@ export type StatementRow = {
   dueDate: string | null; closingDate: string | null; closingDay: number | null; referenceMonth: string | null; paidAt: string | null;
   reconciliation: CardStatementReconciliation; overlapsStatementId: string | null; notes: string | null;
   /** `amountCents` is the bill total: the declared amount plus expenses added on top of it. */
-  declaredCents?: number; addedCents?: number; detailedCents?: number; detailCount?: number;
+  version?: string; declaredCents?: number; addedCents?: number; detailedCents?: number; detailCount?: number;
 };
 export type CardTotals = {
   accountName: string; openCents: number; openCount: number; overdue: boolean; nextDueDate: string | null; closingDate: string | null; closingDay: number | null;

@@ -33,6 +33,8 @@ import { FixedExpensesDialog } from "./FixedExpensesDialog";
 import { AppTooltip } from "@/components/ui/AppTooltip";
 import { FinanceOverviewHeader } from "./FinanceOverviewHeader";
 import { FinanceSectionNav } from "./FinanceSectionNav";
+import { FinanceSpendingCalendar } from "./FinanceSpendingCalendar";
+import type { FinanceCalendarCategory, FinanceCalendarMonth } from "./calendar-core";
 import { useFinanceCopy } from "./finance-copy";
 import type { FinanceOverviewData } from "./overview-query";
 
@@ -44,7 +46,7 @@ function percent(value: number, total: number) {
   return total > 0 ? Math.round(value / total * 100) : 0;
 }
 
-export function FinanceOverview({ data, captureAccounts }: { data: FinanceOverviewData; captureAccounts: CaptureAccount[] }) {
+export function FinanceOverview({ data, captureAccounts, calendar, calendarCategories }: { data: FinanceOverviewData; captureAccounts: CaptureAccount[]; calendar: FinanceCalendarMonth; calendarCategories: FinanceCalendarCategory[] }) {
   const t = useFinanceCopy();
   const { locale } = useI18n();
   const language = localeCode[locale];
@@ -93,6 +95,7 @@ export function FinanceOverview({ data, captureAccounts }: { data: FinanceOvervi
         </RevealOnScroll>)}
       </section>
 
+      <RevealOnScroll><FinanceSpendingCalendar compact initialMonth={calendar} today={data.today} accounts={captureAccounts} categories={calendarCategories} statements={data.calendarStatements} canManageCards={data.canExportReport}/></RevealOnScroll>
       <RevealOnScroll><CompactMonthlyIncome accounts={captureAccounts.filter((a)=>["CHECKING","CASH","DIGITAL_WALLET"].includes(a.type||""))} today={data.today} {...data.monthlyIncome}/></RevealOnScroll>
       {data.funding && data.creditCards.length > 0 && <InvoiceFundingPanel funding={data.funding} compact/>}
 

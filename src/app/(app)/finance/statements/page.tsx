@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowRight, CalendarClock, CreditCard, Info, Landmark, L
 import { PageHeader, EmptyState } from "@/components/ui/PageHeader";
 import { ActionForm } from "@/components/ui/ActionForm";
 import { CardStatementTimelineChart } from "@/components/TbbCharts";
+import { StatementCorrectionDialog } from "@/features/finance/StatementCorrectionDialog";
 import { BankBadge } from "@/features/finance/BankBadge";
 import { CardExpenseButton, CardExpenseDialog } from "@/features/finance/CardExpenseDialog";
 import { CardStatementImport } from "@/features/finance/CardStatementImport";
@@ -50,6 +51,7 @@ export default async function CardStatementsPage() {
   const linkedByStatement = new Map<string, typeof linked>();
   for (const item of linked) linkedByStatement.set(item.cardStatementId!, [...(linkedByStatement.get(item.cardStatementId!) ?? []), item]);
   const hasStatements = rows.length > 0;
+  const correction = (row: StatementRow, compact = false) => row.version && row.status !== "PAID" ? <StatementCorrectionDialog key={row.version} compact={compact} statement={{ ...row, version: row.version, declaredCents: row.declaredCents ?? row.amountCents, addedCents: row.addedCents ?? 0 }}/> : null;
 
   return <div className="stack statements-page">
     <PageHeader eyebrow="MONEY · FATURAS" title="Faturas dos cartões." description="Dívida atual, compromissos futuros e histórico quitado, separados dos lançamentos do dia a dia.">
@@ -125,7 +127,7 @@ export default async function CardStatementsPage() {
             {next && next.detailCount ? <div><dt>Detalhado</dt><dd>{money(next.detailedCents ?? 0)} <small>de {money(next.amountCents)}</small></dd></div> : null}
           </dl>
           <CreditLimitBreakdown breakdown={card.breakdown} editHref={`/finance/accounts?edit=${card.id}`}/>
-          <div className="row"><CardExpenseButton accountId={card.id}><Plus size={14}/>Adicionar gasto</CardExpenseButton><Link className="button-secondary" href={`/finance/transactions?account=${card.id}`}>Ver transações</Link></div>
+          <div className="row">{next && correction(next)}<Link className="button-secondary" href={`/finance/accounts?edit=${card.id}`}>Editar cartão</Link><CardExpenseButton accountId={card.id}><Plus size={14}/>Adicionar gasto</CardExpenseButton><Link className="button-secondary" href={`/finance/transactions?account=${card.id}`}>Ver transações</Link></div>
         </article>;
       })}</section>
 
@@ -138,7 +140,7 @@ export default async function CardStatementsPage() {
             <td className="statement-amount">{money(row.amountCents)}{row.addedCents ? <small>inclui {money(row.addedCents)} somado</small> : null}</td>
             <td>{detail(row)}</td>
             <td><span className="statement-chip" data-tone={row.overdue ? "danger" : "open"}>{row.overdue ? "Vencida, não paga" : "Aberta"}</span></td>
-            <td><CardExpenseButton accountId={row.accountId} statementId={row.id} className="icon-button" label={`Adicionar gasto na fatura ${row.accountName} de ${day(row.dueDate)}`}><Plus size={16}/></CardExpenseButton></td>
+            <td><div className="row">{correction(row, true)}<CardExpenseButton accountId={row.accountId} statementId={row.id} className="icon-button" label={`Adicionar gasto na fatura ${row.accountName} de ${day(row.dueDate)}`}><Plus size={16}/></CardExpenseButton></div></td>
           </tr>)}
         </tbody><tfoot><tr><th colSpan={3}>Total aberto</th><th colSpan={4}>{money(s.openCents)}</th></tr></tfoot></table></div> : <p className="muted">Nenhuma fatura aberta.</p>}
       </section>
@@ -151,7 +153,7 @@ export default async function CardStatementsPage() {
             <td>{row.referenceMonth ? month(row.referenceMonth) : "—"}</td><td>{closing(row)}</td><td>{day(row.dueDate)}</td>
             <td className="statement-amount">{money(row.amountCents)}{row.addedCents ? <small>inclui {money(row.addedCents)} somado</small> : null}</td>
             <td><span className="statement-chip" data-tone={row.awaitingUpdate ? "warning" : "future"}>{row.awaitingUpdate ? "Venceu · aguardando atualização" : "Futura conhecida"}</span></td>
-            <td><CardExpenseButton accountId={row.accountId} statementId={row.id} className="icon-button" label={`Adicionar gasto na fatura ${row.accountName} de ${day(row.dueDate)}`}><Plus size={16}/></CardExpenseButton></td>
+            <td><div className="row">{correction(row, true)}<CardExpenseButton accountId={row.accountId} statementId={row.id} className="icon-button" label={`Adicionar gasto na fatura ${row.accountName} de ${day(row.dueDate)}`}><Plus size={16}/></CardExpenseButton></div></td>
           </tr>)}
           {s.forecasts.map((row) => {
             const overlapped = row.overlapsStatementId ? byId.get(row.overlapsStatementId) : undefined;
@@ -167,7 +169,7 @@ export default async function CardStatementsPage() {
                   <ActionForm action={resolveCardStatementOverlap}><input type="hidden" name="id" value={row.id}/><input type="hidden" name="resolution" value="SEPARATE_CHARGE"/><button className="button-secondary">É cobrança separada</button></ActionForm>
                 </div>
               </div> : <span className="statement-chip" data-tone="forecast">{row.reconciliation === "INCLUDED_IN_STATEMENT" ? "Incluída na fatura · não somada" : "Previsão"}</span>}</td>
-              <td/>
+              <td>{correction(row, true)}</td>
             </tr>;
           })}
         </tbody></table></div> : <p className="muted">Nenhum compromisso futuro informado.</p>}

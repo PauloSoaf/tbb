@@ -10,7 +10,7 @@ import { statementLinkError, suggestStatementForPurchase, type PurchaseStatement
 import { money, moneyInput, parseMoney } from "./money";
 
 const OPEN_EVENT = "tbb:card-expense";
-type Preset = { accountId?: string; statementId?: string };
+type Preset = { accountId?: string; statementId?: string; date?: string };
 export type CardExpenseCard = { id: string; name: string; institution: string | null };
 export type CardExpenseStatement = PurchaseStatement & { referenceMonth: string | null; amountCents: number; detailedCents: number };
 const STATUS = { PAID: "paga", OPEN: "aberta", FUTURE_KNOWN: "futura", FORECAST: "previsão" } as const;
@@ -18,11 +18,11 @@ const day = (value: string) => formatDay(value, "pt-BR", { day: "2-digit", month
 const examples = ["gastei 89,90 no ifood ontem no nubank", "uber 32 reais no picpay hoje", "amazon 219,90 no itau parcelado em 3x"];
 
 /** Any button on the page can open the single dialog, already pointing at a card or a bill. */
-export function CardExpenseButton({ accountId, statementId, className = "button-secondary", label, children }: Preset & { className?: string; label?: string; children: ReactNode }) {
-  return <button type="button" className={className} aria-label={label} onClick={() => window.dispatchEvent(new CustomEvent<Preset>(OPEN_EVENT, { detail: { accountId, statementId } }))}>{children}</button>;
+export function CardExpenseButton({ accountId, statementId, date, className = "button-secondary", label, children }: Preset & { className?: string; label?: string; children: ReactNode }) {
+  return <button type="button" className={className} aria-label={label} onClick={() => window.dispatchEvent(new CustomEvent<Preset>(OPEN_EVENT, { detail: { accountId, statementId, date } }))}>{children}</button>;
 }
 
-export function CardExpenseDialog({ cards, categories, statements, today }: { cards: CardExpenseCard[]; categories: { id: string; name: string }[]; statements: CardExpenseStatement[]; today: string }) {
+export function CardExpenseDialog({ cards, categories, statements, today, onSaved }: { cards: CardExpenseCard[]; categories: { id: string; name: string }[]; statements: CardExpenseStatement[]; today: string; onSaved?: (date: string) => void }) {
   const router = useRouter();
   const dialog = useRef<HTMLDialogElement>(null);
   const [pending, startTransition] = useTransition();
@@ -37,16 +37,16 @@ export function CardExpenseDialog({ cards, categories, statements, today }: { ca
   useEffect(() => {
     const open = (event: Event) => {
       const preset = (event as CustomEvent<Preset>).detail ?? {};
-      setForm((current) => ({ ...current, accountId: preset.accountId ?? current.accountId ?? cards[0]?.id ?? "" }));
+      setForm((current) => ({ ...current, accountId: preset.accountId ?? current.accountId ?? cards[0]?.id ?? "", date: preset.date ?? today }));
       setChoice(preset.statementId ?? "auto");
       setLink(null);
       setError("");
-      setMode(preset.statementId ? "manual" : "text");
+      setMode(preset.statementId || preset.date ? "manual" : "text");
       dialog.current?.showModal();
     };
     window.addEventListener(OPEN_EVENT, open);
     return () => window.removeEventListener(OPEN_EVENT, open);
-  }, [cards]);
+  }, [cards, today]);
 
   const cardStatements = statements.filter((item) => item.accountId === form.accountId).sort((a, b) => (a.dueDate || a.referenceMonth || "").localeCompare(b.dueDate || b.referenceMonth || ""));
   const suggestion = useMemo(() => suggestStatementForPurchase(statements, form.accountId, form.date), [statements, form.accountId, form.date]);
@@ -88,6 +88,7 @@ export function CardExpenseDialog({ cards, categories, statements, today }: { ca
       if ("error" in result) { setError(result.error ?? "Não foi possível salvar o gasto."); return; }
       toast.success(result.success);
       dialog.current?.close();
+      onSaved?.(form.date);
       setText("");
       setProvider(null);
       setForm((current) => ({ ...current, amount: "", description: "", merchant: "", categoryId: "", installments: "1", date: today }));
