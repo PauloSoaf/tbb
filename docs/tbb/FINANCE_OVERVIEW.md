@@ -2,16 +2,22 @@
 
 A visão geral distingue dinheiro disponível, resultados do mês e planejamento. Renda prevista não é dinheiro recebido, limite do cartão não é saldo bancário e possível dívida não é uma dívida cadastrada.
 
+Patrimônio inclui o valor estimado de revenda dos bens ativos cadastrados em [Bens pessoais](PERSONAL_ASSETS.md). O link do indicador e o menu Mais abrem `/finance/assets`; o tooltip separa patrimônio financeiro líquido e bens. Avaliações e financiamentos vinculados aparecem nos relatórios PDF/Markdown. Bens não entram no saldo disponível nem na cobertura das faturas; a dívida vinculada não é descontada novamente.
+
 ## Organização da tela
 
-Depois dos indicadores, do calendário compacto, da renda prevista e do alerta de cobertura de faturas, os blocos aparecem nesta ordem:
+Depois dos indicadores, da renda prevista e do alerta de cobertura de faturas, os blocos aparecem nesta ordem:
 
-1. Contas e Cartões e faturas.
+A renda prevista e a cobertura das faturas dividem uma linha em duas colunas de mesma altura quando há largura suficiente. O alerta resume o valor a cobrir, o saldo e as faturas abertas; explicações ficam no tooltip e a projeção completa continua em Dívidas. O X oculta o alerta durante a visita e permite à renda usar toda a largura. “Mostrar alerta” o restaura; alterações nos totais comparados, nas pendências ou na data fazem a comparação atual reaparecer. Em espaços estreitos, a linha empilha os blocos. Fechar o alerta não altera os registros financeiros.
+
+A revisão de 12/10/2026 passou em 60 verificações no Chrome contra o build de produção: fechamento por teclado, restauração, atualização da comparação, larguras de 320/375/768/1440 px, temas claro/escuro e adaptação ao recolher a sidebar. O build, typecheck e lint dos arquivos passaram; a suíte manteve 406/407, com a falha antiga de caminhos de storage no Windows. Foi corrigida a animação `RevealOnScroll` para revelar o conteúdo sem transição quando movimento reduzido está ativo; a revisão visual confirmou os blocos visíveis com e sem essa preferência, sem erros de runtime/hidratação.
+
+1. Contas, Cartões e faturas e Calendário mensal, em três colunas no desktop.
 2. Fluxo de caixa e Uso da renda.
 3. Gastos por categoria e Economia do mês.
 4. Radar financeiro, próximos vencimentos e transações recentes.
 
-A ordem é definida no conteúdo da página, inclusive na navegação por teclado, mantendo os mesmos blocos no desktop e no celular.
+A coluna de Contas é mais estreita. Em telas intermediárias, o calendário ocupa uma segunda linha; no celular, os três blocos ficam empilhados. A ordem é definida no conteúdo da página, inclusive na navegação por teclado.
 
 ## Contas, cartões e reservas
 
@@ -25,7 +31,11 @@ Corrigir fatura abre um formulário no card e nas tabelas para editar vencimento
 
 ## Calendário financeiro
 
-O calendário compacto da visão geral mostra apenas os dias do mês em uma faixa horizontal com scroll snap. A seleção inicial é hoje, e a lista diária começa recolhida. Selecionar um dia abre detalhes, que podem ser fechados. Valores de saídas e indicadores de entradas, saídas e registros futuros aparecem em cada dia. A faixa respeita movimento reduzido e permite uso por toque e teclado. Ela não altera os parâmetros da visão geral; Tela completa preserva mês e dia selecionados.
+O calendário compacto da visão geral usa uma grade mensal de sete colunas, menor que a página completa, ao lado de Contas e Cartões e faturas. O mês inteiro permanece visível. A seleção inicial é hoje, e a lista diária começa recolhida. Selecionar um dia abre detalhes, que podem ser fechados. Valores de saídas e indicadores de entradas e saídas aparecem em cada dia. O calendário respeita movimento reduzido e permite uso por toque e teclado. Ele não altera os parâmetros da visão geral; Tela completa preserva mês e dia selecionados.
+
+Faturas abertas e futuras conhecidas aparecem no dia do vencimento, com marcação roxa e ícone de cartão. O tooltip identifica os cartões, os valores completos e a diferença entre compromisso de pagamento e gasto registrado. Quando várias faturas vencem juntas, a célula mostra a soma e os detalhes listam cada cartão separadamente. A grade compacta abrevia valores para caber nas células; tooltip e lista preservam os centavos.
+
+Faturas a pagar têm um total separado do resultado do ledger. Elas usam os valores efetivos já calculados no fluxo de faturas, incluindo compras adicionadas ao total. Compras já incluídas não aumentam novamente a fatura. A marcação não cria despesas nem pagamentos. Faturas pagas, previsões sem vencimento e valores zerados não aparecem como compromissos a pagar. Essas informações permanecem privadas do titular e reutilizam os dados já carregados, sem novas consultas ao banco.
 
 A página `/finance/calendar` mantém a grade mensal de sete colunas, navegação contínua e gestos horizontais para trocar meses. Os parâmetros `month` e `day` acompanham a seleção usando a History API integrada ao Next.js, permitindo links diretos e Voltar/Avançar do navegador sem recarregar a página. Parâmetros inválidos usam uma seleção válida. Textos e datas seguem PT, EN ou ES.
 
@@ -77,10 +87,16 @@ Build de produção, typecheck e lint dos arquivos alterados passaram. A suíte 
 
 Foram aprovadas 39 verificações no Chrome: 34 em desenvolvimento e cinco na versão de produção. A conferência cobriu desktop e celular de 390 px, temas claro e escuro, traduções, navegação, correção de faturas, cadastro com a data selecionada, compra vinculada no crédito, atualização do mês carregado e limites do gráfico. As verificações finais não registraram erros de runtime ou hidratação. Os testes com gravação usaram um banco descartável com dados sintéticos, removido após a validação.
 
-## Validação do hotfix do calendário de 11/10/2026
+## Validação do hotfix anterior de 11/10/2026 (b1f853e)
 
 Typecheck, build de produção e lint dos arquivos alterados passaram. Os 37 testes do calendário passaram; a suíte completa passou em 356 de 357 testes, mantendo apenas a falha de caminhos POSIX no Windows já descrita acima. O lint geral mantém os mesmos quatro erros e um aviso anteriores fora do escopo.
 
 Foram aprovadas 87 verificações no Chrome contra o build de produção, com dados sintéticos em banco descartável. A conferência incluiu as larguras de 320, 375, 768 e 1440 px nos temas claro e escuro, detalhes expansíveis, teclado, toque, movimento reduzido, PT/EN/ES, links diretos, histórico, dias adjacentes, retry após falha de rede, cadastros em meses carregados e atualização após criação, edição e exclusão externa. Permissões com overrides e privacidade dos identificadores de faturas também foram conferidas. Não houve erros de runtime ou hidratação.
 
 A faixa de dias manteve o conteúdo abaixo de 130 px de altura. A revisão das imagens levou a dois ajustes de responsividade no CSS global: espaçamento do cabeçalho em telas estreitas e organização da faixa de renda para evitar overflow e sobreposição de botões. Os dados reais foram conferidos somente por leitura e permaneceram preservados.
+
+## Validação da grade mensal e dos vencimentos de faturas de 11/10/2026
+
+Typecheck, build de produção e lint dos arquivos alterados passaram. Os 45 testes do calendário passaram; a suíte completa passou em 364 de 365 testes, com a mesma falha de caminhos POSIX no Windows já registrada.
+
+Foram aprovadas 70 verificações distintas no Chrome contra o build de produção. A conferência cobriu as três colunas no desktop, Contas mais estreito, a grade mensal reduzida e os detalhes diários nos temas claro e escuro em 320, 375, 768 e 1440 px. Também verificou valores exatos nos tooltips, várias faturas no mesmo vencimento, faturas futuras conhecidas, ausência de faturas pagas como compromissos, teclado, toque, PT/EN/ES e privacidade para MEMBER/VIEWER. Uma compra adicionada ao total da fatura foi salva no banco sintético e atualizou o valor a pagar sem misturá-lo ao total de gastos registrados. Não houve erros de runtime ou hidratação. Os dados reais foram preservados e a validação com gravação ficou restrita ao banco descartável.

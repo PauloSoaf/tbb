@@ -13,6 +13,7 @@ import { applyCardStatementImport, previewCardStatementImport } from "./card-sta
 import { statementLinkError } from "./card-statements";
 import { interpretCardExpenseText } from "./natural-language";
 import { ensureUnassignedAccount } from "./unassigned-account";
+import { rollbackFinancialDocument } from "./document-import";
 
 const text = (fd: FormData, key: string) => String(fd.get(key) || "").trim();
 const name = (fd: FormData, key = "name") => z.string().min(1, "Informe um nome.").max(200).parse(text(fd, key));
@@ -333,6 +334,7 @@ export async function uploadCsv(fd: FormData) {
   const ctx = await requirePermission("WRITE");
   try {
     const account = await accountOrUnassigned(ctx.workspaceId, text(fd, "accountId"));
+    if (account?.type === "CREDIT_CARD") throw new Error("Use Documentos e conciliação para compras e pagamentos de cartão.");
     const file = fd.get("file");
     if (!(file instanceof File) || file.size === 0 || file.size > 5_000_000 || !file.name.toLowerCase().endsWith(".csv")) throw new Error("Selecione um CSV UTF-8 de até 5 MB.");
     const rawContent = await file.text();
@@ -346,6 +348,7 @@ export async function uploadPastedData(fd: FormData) {
   const ctx = await requirePermission("WRITE");
   try {
     const account = await accountOrUnassigned(ctx.workspaceId, text(fd, "accountId"));
+    if (account?.type === "CREDIT_CARD") throw new Error("Use Documentos e conciliação para compras e pagamentos de cartão.");
     const rawContent = text(fd, "content");
     if (!rawContent || Buffer.byteLength(rawContent, "utf8") > 1_000_000) throw new Error("Cole dados tabulares de até 1 MB.");
     const parsed = CsvFinanceImportParser.parse(rawContent);
@@ -360,6 +363,7 @@ export async function uploadFinanceDocument(fd: FormData) {
   const ctx = await requirePermission("WRITE");
   try {
     const account = await accountOrUnassigned(ctx.workspaceId, text(fd, "accountId"));
+    if (account?.type === "CREDIT_CARD") throw new Error("Use Documentos e conciliação para faturas de cartão.");
     const file = fd.get("file");
     if (!(file instanceof File) || !file.size || file.size > 5_000_000) throw new Error("Selecione um CSV ou PDF de até 5 MB.");
     const lower = file.name.toLowerCase();
@@ -386,7 +390,7 @@ export async function uploadFinanceDocument(fd: FormData) {
       if (!dateMatch || !amountMatch || dateMatch.index === undefined || amountMatch.index === undefined || amountMatch.index <= dateMatch.index) continue;
       const description = rawLine.slice(dateMatch.index + dateMatch[0].length, amountMatch.index).replace(/\s+/g, " ").trim();
       if (description.length < 2) continue;
-      const rawDate=dateMatch[0];const normalizedPdfDate=/^\d{2}[/.\-]\d{2}$/.test(rawDate)?`${rawDate}/${new Date().getUTCFullYear()}`:rawDate;
+      const rawDate=dateMatch[0];const normalizedPdfDate=rawDate;
       candidates.push([csvCell(normalizedPdfDate), csvCell(description.slice(0, 300)), csvCell(amountMatch[1].replace(/\s/g, ""))].join(";"));
     }
     if (!candidates.length) throw new Error("O PDF tem texto, mas nenhuma linha financeira segura foi reconhecida. Use CSV ou cole os dados na grade.");
@@ -435,6 +439,7 @@ export async function confirmCsvImport(fd: FormData) {
       if (batch.failedCount > 0 && fd.get("acceptErrors") !== "on") throw new Error("Confirme que deseja ignorar as linhas inválidas.");
       const account = await tx.account.findFirst({ where: { id: batch.accountId, workspaceId: ctx.workspaceId, isArchived: false, currency: "BRL" } });
       if (!account) throw new Error("A conta foi arquivada. Envie o CSV para uma conta ativa.");
+      if (account.type === "CREDIT_CARD") throw new Error("Lote de cartão precisa da revisão de documentos; pagamentos não podem virar receita.");
       const rows = batch.preview as unknown as ImportPreviewRow[];
       if (!Array.isArray(rows)) throw new Error("Prévia indisponível. Revise o arquivo novamente.");
       const fingerprints = await existingFingerprints(tx, ctx.workspaceId, batch.accountId);
@@ -460,8 +465,9 @@ export async function rollbackImport(fd: FormData) {
   try {
     if (text(fd, "confirmation") !== "DESFAZER") throw new Error("Digite DESFAZER para confirmar o rollback.");
     const result = await prisma.$transaction(async tx => {
-      const batch = await tx.importBatch.findFirst({ where: { id: text(fd, "batchId"), workspaceId: ctx.workspaceId, status: "COMPLETED" } });
+      const batch = await tx.importBatch.findFirst({ where: { id: text(fd, "batchId"), workspaceId: ctx.workspaceId, status: { in: ["COMPLETED", "NEEDS_REVIEW"] } } });
       if (!batch) throw new Error("Lote indisponível ou já desfeito.");
+      if (batch.source === "DOCUMENT_V2") return rollbackFinancialDocument(tx, ctx, batch.id);
       const removed = await tx.financeTransaction.deleteMany({ where: { workspaceId: ctx.workspaceId, importBatchId: batch.id, revision: 0 } });
       const preserved = await tx.financeTransaction.count({ where: { workspaceId: ctx.workspaceId, importBatchId: batch.id } });
       await tx.importBatch.update({ where: { id: batch.id }, data: { status: preserved ? "PARTIAL_ROLLBACK" : "ROLLED_BACK", rolledBackAt: new Date(), rolledBackCount: removed.count, preservedCount: preserved } });
@@ -524,9 +530,10 @@ const addMonths = (value: Date, months: number) => {
 async function statementForLink(tx: Prisma.TransactionClient, workspaceId: string, statementId: string, accountId: string, excludeTransactionId?: string) {
   const statement = await tx.cardStatement.findFirst({ where: { id: statementId, workspaceId, accountId }, select: { id: true, status: true, amountCents: true, dueDate: true, referenceMonth: true } });
   if (!statement) throw new Error("A fatura escolhida não pertence a este cartão.");
-  const linked = await tx.financeTransaction.findMany({ where: { workspaceId, cardStatementId: statementId, type: "EXPENSE", ...(excludeTransactionId ? { id: { not: excludeTransactionId } } : {}) }, select: { amountCents: true, statementDetailMode: true } });
-  const addedCents = linked.reduce((sum, item) => sum + (item.statementDetailMode === "ADDED_TO_STATEMENT" ? item.amountCents : 0), 0);
-  return { ...statement, totalCents: statement.amountCents + addedCents, detailedCents: linked.reduce((sum, item) => sum + item.amountCents, 0) };
+  const linked = await tx.financeTransaction.findMany({ where: { workspaceId, cardStatementId: statementId, type: { in: ["EXPENSE", "REFUND"] }, ...(excludeTransactionId ? { id: { not: excludeTransactionId } } : {}) }, select: { amountCents: true, statementDetailMode: true, type: true } });
+  const signed = (item: { type: string; amountCents: number }) => (item.type === "REFUND" ? -1 : 1) * item.amountCents;
+  const addedCents = linked.reduce((sum, item) => sum + (item.statementDetailMode === "ADDED_TO_STATEMENT" ? signed(item) : 0), 0);
+  return { ...statement, totalCents: statement.amountCents + addedCents, detailedCents: linked.reduce((sum, item) => sum + signed(item), 0) };
 }
 
 export async function interpretCardExpense(fd: FormData) {

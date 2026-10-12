@@ -1,11 +1,34 @@
+"use client";
+
 import Link from "next/link";
+import { AlertTriangle, ArrowUpRight, CheckCircle2, CircleHelp, X } from "lucide-react";
+import { AppTooltip } from "@/components/ui/AppTooltip";
 import { money } from "./money";
 import type { InvoiceFunding } from "./bank-accounts";
 
-export function InvoiceFundingPanel({ funding, compact = false }: { funding: InvoiceFunding; compact?: boolean }) {
+export function InvoiceFundingPanel({ funding, compact = false, onDismiss }: { funding: InvoiceFunding; compact?: boolean; onDismiss?: () => void }) {
   const missing = !funding.hasCash;
   const title = missing ? "Informe o saldo das contas" : funding.shortfallCents ? "Possível dívida: falta dinheiro para as faturas" : funding.missingStatementCount ? "Cobertura das faturas: dados incompletos" : "As faturas abertas cabem no saldo registrado";
   const max = Math.max(funding.openCents, funding.availableCents, 1);
+  if (compact) {
+    const risk = missing || funding.missingStatementCount && !funding.shortfallCents ? "unknown" : funding.shortfallCents ? "danger" : "safe";
+    const Icon = risk === "safe" ? CheckCircle2 : AlertTriangle;
+    const heading = missing ? "Cobertura desconhecida" : funding.shortfallCents ? "Possível dívida nas faturas" : funding.missingStatementCount ? "Cobertura incompleta" : "Faturas cobertas pelo saldo";
+    const value = missing ? "Informe o saldo das contas" : funding.shortfallCents ? `${money(funding.shortfallCents)} a cobrir` : `${money(funding.afterInvoicesCents)} após as faturas`;
+    const explanation = `${title}. Compara o dinheiro de hoje com as faturas abertas. Cofrinhos, renda prevista e limite de crédito ficam fora. Faturas futuras aparecem na projeção detalhada.${funding.missingStatementCount ? ` ${funding.missingStatementCount} cartão(ões) ainda sem faturas registradas; os compromissos desses cartões não estão incluídos.` : ""}${funding.overdueCount ? ` ${funding.overdueCount} fatura(s) vencida(s).` : ""}`;
+    return <section className="invoice-funding is-compact" data-risk={risk} aria-label="Cobertura das faturas">
+      <span className="funding-compact-icon"><Icon size={18}/></span>
+      <div className="funding-compact-content">
+        <div className="funding-compact-heading"><h2>{heading}</h2><AppTooltip content={explanation}><button className="funding-compact-help" type="button" aria-label="Como a cobertura das faturas é calculada"><CircleHelp size={13}/></button></AppTooltip></div>
+        <strong>{value}</strong>
+        <span className="funding-compact-values">Saldo {missing ? "não informado" : money(funding.cashCents)} <span aria-hidden="true">·</span> Faturas {money(funding.openCents)}</span>
+      </div>
+      <div className="funding-compact-actions">
+        <AppTooltip content={missing ? "Informar saldo das contas" : "Ver previsão de dívidas"}><Link href={missing ? "/finance/accounts" : "/finance/debts"} className="funding-compact-details" aria-label={missing ? "Informar saldo das contas" : "Ver previsão de dívidas"}><ArrowUpRight size={17}/></Link></AppTooltip>
+        {onDismiss && <button className="funding-compact-dismiss" type="button" onClick={onDismiss} aria-label="Fechar alerta de faturas"><X size={17}/></button>}
+      </div>
+    </section>;
+  }
   return <section className="panel stack invoice-funding" data-risk={missing ? "unknown" : funding.shortfallCents ? "danger" : funding.missingStatementCount ? "unknown" : "safe"} aria-label="Cobertura das faturas">
     <div className="row justify-between"><h2>{title}</h2><Link href={compact ? "/finance/debts" : "/finance/accounts"}>{compact ? "Ver previsão de dívidas →" : "Atualizar saldos →"}</Link></div>
     <p className="muted">{missing ? "Você tem cartões cadastrados, mas ainda precisa adicionar o saldo da conta corrente no card do banco. Sem esse saldo, a cobertura é desconhecida." : funding.shortfallCents ? `${money(funding.shortfallCents)} ainda precisam ser cobertos antes de quitar todas as faturas abertas.` : `${money(funding.afterInvoicesCents)} sobram depois das faturas abertas, antes das outras despesas.`}</p>

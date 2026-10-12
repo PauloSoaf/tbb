@@ -28,11 +28,12 @@ export default async function CardStatementsPage() {
 
   const today = dayKey(new Date(), c.workspace.timezone);
   const rows = await cardStatementRows(c);
-  const [positions, incomeCents, categories, linked] = await Promise.all([
+  const [positions, incomeCents, categories, linked, bankLimits] = await Promise.all([
     creditCardPositions(c.workspaceId, today, rows),
     monthlyIncomeReference(c.workspaceId, today),
     prisma.financeCategory.findMany({ where: { workspaceId: c.workspaceId, isArchived: false, type: "EXPENSE" }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
-    prisma.financeTransaction.findMany({ where: { workspaceId: c.workspaceId, cardStatementId: { not: null }, type: "EXPENSE" }, select: { id: true, description: true, merchant: true, amountCents: true, date: true, cardStatementId: true, statementDetailMode: true }, orderBy: [{ date: "desc" }, { createdAt: "desc" }] }),
+    prisma.financeTransaction.findMany({ where: { workspaceId: c.workspaceId, cardStatementId: { not: null }, type: { in: ["EXPENSE", "REFUND"] } }, select: { id: true, description: true, merchant: true, amountCents: true, date: true, cardStatementId: true, statementDetailMode: true, type: true, eventKind: true, postedDate: true, occurredAt: true, occurredTimezone: true }, orderBy: [{ date: "desc" }, { createdAt: "desc" }] }),
+    prisma.financialSnapshot.findMany({ where: { workspaceId: c.workspaceId, kind: "BANK_CREDIT_LIMIT" }, select: { accountId: true, asOfDate: true, payload: true }, orderBy: [{ asOfDate: "desc" }, { createdAt: "desc" }], take: 100 }),
   ]);
   const s = summarizeCardStatements(rows, today);
   const alerts = statementAlerts(s, { today, monthlyIncomeCents: incomeCents, cardsWithoutLimit: positions.filter((card) => card.totals && !card.creditLimitCents).map((card) => card.name) });
@@ -43,7 +44,8 @@ export default async function CardStatementsPage() {
   const closing = (row: Pick<StatementRow, "closingDate" | "closingDay">) => (row.closingDate ? day(row.closingDate) : row.closingDay ? `Dia ${row.closingDay}` : "Não informado");
   const percent = (part: number, total: number) => (total ? Math.round(part / total * 100) : 0);
   const badge = (accountId: string, name: string, size = 28) => <BankBadge institution={cardOf.get(accountId)?.institution} name={name} size={size}/>;
-  const detail = (row: StatementRow) => (row.detailCount ? `${money(row.detailedCents ?? 0)} · ${percent(row.detailedCents ?? 0, row.amountCents)}%` : "—");
+  const detailBase = (row: StatementRow) => row.declaredCents === undefined ? row.amountCents : row.declaredCents + (row.addedCents || 0);
+  const detail = (row: StatementRow) => (row.detailCount ? `${money(row.detailedCents ?? 0)} · ${percent(row.detailedCents ?? 0, detailBase(row))}%` : "—");
   const composition = positions.filter((card) => card.totals && card.totals.openCents > 0).sort((a, b) => b.totals!.openCents - a.totals!.openCents);
   const statementCards = positions.filter((card) => card.totals);
   const soon = s.futureKnown.filter((row) => (row.dueDate || "") <= addDays(today, 30)).length;
@@ -118,15 +120,19 @@ export default async function CardStatementsPage() {
       <section className="statement-cards" aria-label="Cartões">{statementCards.map((card) => {
         const totals = card.totals!;
         const next = s.open.find((row) => row.accountId === card.id);
+        const bankLimit = bankLimits.find(snapshot => snapshot.accountId === card.id);
+        const reportedAvailable = (bankLimit?.payload as { availableCents?: number } | undefined)?.availableCents;
         return <article className="panel statement-card" key={card.id}>
           <header>{badge(card.id, card.name, 40)}<div><h3>{card.name}</h3><small className="muted">{card.institution || "Sem instituição"}</small></div>{next?.overdue && <span className="statement-chip" data-tone="danger">Vencida</span>}</header>
           <div className="statement-card-amount"><small>Fatura aberta</small><strong>{money(totals.openCents)}</strong><span className="muted">{next ? `Vence ${day(next.dueDate)} · fecha ${closing(next).toLowerCase()}` : "Nenhuma fatura aberta"}</span></div>
           <dl className="statement-card-facts">
             <div><dt>Futuras conhecidas</dt><dd>{money(totals.futureKnownCents)} <small>{totals.futureKnownCount} fatura(s)</small></dd></div>
             <div><dt>Histórico pago</dt><dd>{money(totals.paidCents)} <small>{totals.paidCount} fatura(s)</small></dd></div>
-            {next && next.detailCount ? <div><dt>Detalhado</dt><dd>{money(next.detailedCents ?? 0)} <small>de {money(next.amountCents)}</small></dd></div> : null}
+            {next && next.detailCount ? <div><dt>Detalhado</dt><dd>{money(next.detailedCents ?? 0)} <small>do total original {money(detailBase(next))}</small></dd></div> : null}
           </dl>
           <CreditLimitBreakdown breakdown={card.breakdown} editHref={`/finance/accounts?edit=${card.id}`}/>
+          {next?.notes && <small className="muted">{next.notes}</small>}
+          {bankLimit && typeof reportedAvailable === "number" && Number.isSafeInteger(reportedAvailable) && <small className="muted">Banco informou disponível {money(reportedAvailable)} em {day(bankLimit.asOfDate.toISOString().slice(0, 10))}. A barra acima usa os compromissos registrados no TBB.</small>}
           <div className="row">{next && correction(next)}<Link className="button-secondary" href={`/finance/accounts?edit=${card.id}`}>Editar cartão</Link><CardExpenseButton accountId={card.id}><Plus size={14}/>Adicionar gasto</CardExpenseButton><Link className="button-secondary" href={`/finance/transactions?account=${card.id}`}>Ver transações</Link></div>
         </article>;
       })}</section>
@@ -181,12 +187,13 @@ export default async function CardStatementsPage() {
           const statement = byId.get(statementId);
           if (!statement) return null;
           return <article className="statement-detail" key={statementId}>
-            <header>{badge(statement.accountId, statement.accountName)}<strong>{statement.accountName} · {statement.dueDate ? `vence ${day(statement.dueDate)}` : month(statement.referenceMonth)}</strong><span className="muted">Detalhado {money(statement.detailedCents ?? 0)} de {money(statement.amountCents)} · sem detalhe {money(Math.max(0, statement.amountCents - (statement.detailedCents ?? 0)))}</span></header>
+            <header>{badge(statement.accountId, statement.accountName)}<strong>{statement.accountName} · {statement.dueDate ? `vence ${day(statement.dueDate)}` : month(statement.referenceMonth)}</strong><span className="muted">Detalhado {money(statement.detailedCents ?? 0)} do total original {money(detailBase(statement))} · sem detalhe {money(Math.max(0, detailBase(statement) - (statement.detailedCents ?? 0)))}</span></header>
             <ul>{items.map((item) => <li key={item.id}>
               <span className="muted">{day(item.date.toISOString().slice(0, 10))}</span>
               <span>{item.merchant || item.description}</span>
-              <b>{money(item.amountCents)}</b>
+              <b>{money(item.type === "REFUND" ? -item.amountCents : item.amountCents)}</b>
               <span className="statement-chip" data-tone={item.statementDetailMode === "ADDED_TO_STATEMENT" ? "future" : "success"}>{item.statementDetailMode === "ADDED_TO_STATEMENT" ? "Somado ao total" : "Já incluído"}</span>
+              <small className="muted">{item.eventKind === "FINANCING_INSTALLMENT" ? "Financiamento · fora do consumo" : item.type === "REFUND" ? "Estorno" : "Compra/encargo"}{item.postedDate ? ` · lançado ${day(item.postedDate.toISOString().slice(0, 10))}` : ""}{item.occurredAt && item.occurredTimezone ? ` · ${item.occurredAt.toLocaleTimeString(c.workspace.locale, { timeZone: item.occurredTimezone, hour: "2-digit", minute: "2-digit" })}` : ""}</small>
               <span className="row">
                 <ActionForm action={updateStatementLink}><input type="hidden" name="transactionId" value={item.id}/><input type="hidden" name="statementId" value={statementId}/><input type="hidden" name="mode" value={item.statementDetailMode === "ADDED_TO_STATEMENT" ? "ALREADY_INCLUDED" : "ADDED_TO_STATEMENT"}/><button className="button-secondary">{item.statementDetailMode === "ADDED_TO_STATEMENT" ? "Já estava incluído" : "Somar ao total"}</button></ActionForm>
                 <ActionForm action={updateStatementLink}><input type="hidden" name="transactionId" value={item.id}/><input type="hidden" name="statementId" value=""/><button className="button-secondary">Desvincular</button></ActionForm>
@@ -204,6 +211,7 @@ export default async function CardStatementsPage() {
       </details>
     </>}
 
+    {s.carried.length > 0 && <section className="panel stack"><h2>Histórico com saldo carregado</h2><p className="muted">O restante destas faturas já está na fatura seguinte. Ele não é somado outra vez à dívida atual nem aos vencimentos do calendário.</p>{s.carried.map(row => <div className="list-item" key={row.id}><div><strong>{row.accountName} · {month(row.referenceMonth)}</strong><p>Total original {money(row.declaredCents ?? row.amountCents)} · pagamento {money(row.paidCents || 0)} · saldo {money(row.amountCents)}</p></div><a href={`#fatura-${row.rolledIntoStatementId}`}>Ver fatura que inclui este saldo →</a></div>)}</section>}
     <section id="importar"><CardStatementImport/></section>
     <CardExpenseDialog cards={positions.map(({ id, name, institution }) => ({ id, name, institution }))} categories={categories} today={today}
       statements={rows.map(({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents }) => ({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents: detailedCents ?? 0 }))}/>

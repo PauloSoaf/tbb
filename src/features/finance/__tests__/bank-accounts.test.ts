@@ -31,6 +31,12 @@ describe("bank products", () => {
 });
 
 describe("automatic possible debt", () => {
+  it("does not count a partial historical balance again after verified carryover", () => {
+    const rows = [statement({ id: "previous", amountCents: 15000, dueDate: "2031-12-12", rolledIntoStatementId: "bill" }), statement()];
+    const result = invoiceFunding([account(), card], rows, "2032-01-10");
+    expect(result).toMatchObject({ openCents: 36000, shortfallCents: 12000, overdueCount: 0 });
+    expect(result.timeline).toEqual([{ month: "2032-01", amountCents: 36000, cumulativeCents: 36000, shortfallCents: 12000 }]);
+  });
   it("compares registered spendable cash with unpaid effective invoice totals", () => {
     expect(invoiceFunding([account(), card], [statement()], "2032-01-10")).toMatchObject({ cashCents: 24000, openCents: 36000, shortfallCents: 12000, afterInvoicesCents: -12000 });
   });

@@ -20,26 +20,29 @@ export async function cardStatementRows(viewer: StatementViewer): Promise<Statem
   const [rows, linked] = await Promise.all([
     prisma.cardStatement.findMany({
       where: { workspaceId: viewer.workspaceId },
-      select: { id: true, updatedAt: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, closingDate: true, closingDay: true, referenceMonth: true, paidAt: true, reconciliation: true, overlapsStatementId: true, notes: true, account: { select: { name: true } } },
+      select: { id: true, updatedAt: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, closingDate: true, closingDay: true, referenceMonth: true, paidAt: true, sourceAsOf: true, reconciliation: true, overlapsStatementId: true, notes: true, rolledIntoStatementId: true, amountIsOutstanding: true, payments: { select: { amountCents: true, date: true } }, account: { select: { name: true } } },
     }),
     prisma.financeTransaction.findMany({
-      where: { workspaceId: viewer.workspaceId, cardStatementId: { not: null }, type: "EXPENSE" },
-      select: { cardStatementId: true, statementDetailMode: true, amountCents: true },
+      where: { workspaceId: viewer.workspaceId, cardStatementId: { not: null }, type: { in: ["EXPENSE", "REFUND"] } },
+      select: { cardStatementId: true, statementDetailMode: true, amountCents: true, type: true },
     }),
   ]);
   const detail = new Map<string, { addedCents: number; detailedCents: number; detailCount: number }>();
   for (const item of linked) {
     const current = detail.get(item.cardStatementId!) ?? { addedCents: 0, detailedCents: 0, detailCount: 0 };
-    current.detailedCents += item.amountCents;
+    const signed = (item.type === "REFUND" ? -1 : 1) * item.amountCents;
+    current.detailedCents += signed;
     current.detailCount += 1;
-    if (item.statementDetailMode === "ADDED_TO_STATEMENT") current.addedCents += item.amountCents;
+    if (item.statementDetailMode === "ADDED_TO_STATEMENT") current.addedCents += signed;
     detail.set(item.cardStatementId!, current);
   }
-  return rows.map(({ account, updatedAt, ...row }) => {
+  return rows.map(({ account, updatedAt, payments, ...row }) => {
     const extra = detail.get(row.id) ?? { addedCents: 0, detailedCents: 0, detailCount: 0 };
+    const paidCents = (payments || []).reduce((sum, item) => sum + item.amountCents, 0);
+    const deductiblePaid = row.amountIsOutstanding ? (payments || []).filter(p => p.date && row.sourceAsOf && p.date > row.sourceAsOf).reduce((sum, p) => sum + p.amountCents, 0) : paidCents;
     return {
       ...row, ...extra, version: updatedAt?.toISOString() || "", accountName: account.name, dueDate: dayOf(row.dueDate), closingDate: dayOf(row.closingDate), paidAt: dayOf(row.paidAt),
-      amountCents: row.amountCents + extra.addedCents, declaredCents: row.amountCents,
+      amountCents: row.status === "PAID" ? row.amountCents + extra.addedCents : Math.max(0, row.amountCents + extra.addedCents - deductiblePaid), declaredCents: row.amountCents, paidCents,
     };
   });
 }
@@ -90,7 +93,7 @@ export async function financeSummary(workspaceId: string, today: string) {
   const monthStart=dateKeyToUTC(startOfMonth(today)); const tomorrow=dateKeyToUTC(addDays(today,1));
   const [accounts, month, subscriptions, debts, savings, monthlyIncome] = await Promise.all([
     prisma.account.findMany({where:{workspaceId,isArchived:false},include:{transactions:{where:{source:{not:"QUICK_INCOME"},date:{lt:tomorrow}},select:{type:true,amountCents:true}},incomingTransactions:{where:{date:{lt:tomorrow}},select:{amountCents:true}}},orderBy:{createdAt:"asc"}}),
-    prisma.financeTransaction.groupBy({by:["type"],where:{workspaceId,source:{not:"QUICK_INCOME"},date:{gte:monthStart,lt:tomorrow}},_sum:{amountCents:true}}),
+    prisma.financeTransaction.groupBy({by:["type"],where:{workspaceId,source:{not:"QUICK_INCOME"},isConsumption:true,date:{gte:monthStart,lt:tomorrow}},_sum:{amountCents:true}}),
     prisma.subscription.findMany({where:{workspaceId,status:"ACTIVE"}}),
     prisma.debt.aggregate({where:{workspaceId,status:"ACTIVE"},_sum:{remainingBalanceCents:true}}),
     prisma.savingsGoal.aggregate({where:{workspaceId,status:"ACTIVE"},_sum:{currentAmountCents:true,targetAmountCents:true}}),
@@ -113,7 +116,7 @@ export async function monthlyCashFlow(workspaceId: string, months=6, today=new D
   const until=dateKeyToUTC(addDays(today,1));
   const rows=await prisma.$queryRaw<Array<{month:Date;type:string;total:bigint}>>(Prisma.sql`
     SELECT date_trunc('month', "date") AS month, "type"::text AS type, SUM("amountCents")::bigint AS total
-    FROM "FinanceTransaction" WHERE "workspaceId"=${workspaceId} AND "source"<>'QUICK_INCOME' AND "date">=${from} AND "date"<${until}
+    FROM "FinanceTransaction" WHERE "workspaceId"=${workspaceId} AND "source"<>'QUICK_INCOME' AND "isConsumption"=true AND "date">=${from} AND "date"<${until}
     GROUP BY 1,2 ORDER BY 1 ASC`);
   const map=new Map(monthKeys.map(key=>[key,{month:key,income:0,expenses:0}]));
   for(const row of rows){const key=row.month.toISOString().slice(0,7);const item=map.get(key)||{month:key,income:0,expenses:0};if(row.type==="INCOME"||row.type==="REFUND")item.income+=Number(row.total)/100;if(row.type==="EXPENSE")item.expenses+=Number(row.total)/100;map.set(key,item);}
@@ -121,7 +124,7 @@ export async function monthlyCashFlow(workspaceId: string, months=6, today=new D
 }
 
 export async function spendingByCategory(workspaceId: string, from: Date) {
-  return prisma.financeTransaction.groupBy({by:["categoryId"],where:{workspaceId,type:"EXPENSE",date:{gte:from}},_sum:{amountCents:true},orderBy:{_sum:{amountCents:"desc"}},take:8});
+  return prisma.financeTransaction.groupBy({by:["categoryId"],where:{workspaceId,type:"EXPENSE",isConsumption:true,date:{gte:from}},_sum:{amountCents:true},orderBy:{_sum:{amountCents:"desc"}},take:8});
 }
 
 export async function financeAnalytics(workspaceId:string,today:string){
@@ -130,16 +133,16 @@ export async function financeAnalytics(workspaceId:string,today:string){
   const todayDate=dateKeyToUTC(today);
   const monthRange={gte:dateKeyToUTC(startOfMonth(today)),lt:dateKeyToUTC(addDays(today,1))};
   const [categoryTotals,dailyTotals,categoryNames,creditAccounts,budgets,subscriptions,debts]=await Promise.all([
-    prisma.financeTransaction.groupBy({by:["categoryId"],where:{workspaceId,type:"EXPENSE",date:range},_sum:{amountCents:true},orderBy:{_sum:{amountCents:"desc"}},take:7}),
-    prisma.financeTransaction.groupBy({by:["date"],where:{workspaceId,type:"EXPENSE",date:range},_sum:{amountCents:true},orderBy:{date:"asc"}}),
+    prisma.financeTransaction.groupBy({by:["categoryId"],where:{workspaceId,type:"EXPENSE",isConsumption:true,date:range},_sum:{amountCents:true},orderBy:{_sum:{amountCents:"desc"}},take:7}),
+    prisma.financeTransaction.groupBy({by:["date"],where:{workspaceId,type:"EXPENSE",isConsumption:true,date:range},_sum:{amountCents:true},orderBy:{date:"asc"}}),
     prisma.financeCategory.findMany({where:{workspaceId,isArchived:false},select:{id:true,name:true,color:true}}),
-    prisma.account.findMany({where:{workspaceId,isArchived:false,type:"CREDIT_CARD"},select:{id:true,name:true,institution:true,creditLimitCents:true,dueDay:true,transactions:{where:{date:monthRange,type:{in:["EXPENSE","REFUND"]}},select:{type:true,amountCents:true}}},orderBy:{createdAt:"asc"}}),
+    prisma.account.findMany({where:{workspaceId,isArchived:false,type:"CREDIT_CARD"},select:{id:true,name:true,institution:true,creditLimitCents:true,dueDay:true,transactions:{where:{date:monthRange,isConsumption:true,type:{in:["EXPENSE","REFUND"]}},select:{type:true,amountCents:true}}},orderBy:{createdAt:"asc"}}),
     prisma.budget.findMany({where:{workspaceId,startDate:{lte:todayDate},endDate:{gte:todayDate}},include:{category:{select:{name:true,color:true}}},orderBy:{limitCents:"desc"}}),
     prisma.subscription.findMany({where:{workspaceId,status:"ACTIVE"},select:{name:true,amountCents:true,nextChargeDate:true,billingCycle:true,customDays:true}}),
     prisma.debt.findMany({where:{workspaceId,status:"ACTIVE",minimumPaymentCents:{gt:0}},select:{name:true,minimumPaymentCents:true,dueDay:true}}),
   ]);
   const names=new Map(categoryNames.map(category=>[category.id,category]));
-  const budgetSpending=await Promise.all(budgets.map(budget=>prisma.financeTransaction.aggregate({where:{workspaceId,categoryId:budget.categoryId,type:"EXPENSE",date:{gte:budget.startDate,lte:budget.endDate}},_sum:{amountCents:true}})));
+  const budgetSpending=await Promise.all(budgets.map(budget=>prisma.financeTransaction.aggregate({where:{workspaceId,categoryId:budget.categoryId,type:"EXPENSE",isConsumption:true,date:{gte:budget.startDate,lte:budget.endDate}},_sum:{amountCents:true}})));
   const [year,month,day]=today.split("-").map(Number);
   const daysInMonth=new Date(Date.UTC(year,month,0)).getUTCDate();
   const nextDebtDate=(dueDay:number|null)=>{

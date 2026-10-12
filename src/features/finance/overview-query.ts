@@ -6,6 +6,8 @@ import { calculateFixedExpenses, fixedExpenseKey } from "./fixed-expenses";
 import { cardStatementRows, creditCardPositions, type StatementViewer } from "./queries";
 import { isUnassignedAccount } from "./unassigned-account";
 import { groupBankAccounts, invoiceFunding } from "./bank-accounts";
+import { personalAssetRows } from "./personal-asset-query";
+import { netWorthWithPersonalAssets } from "./personal-assets";
 
 export type FinanceOverviewData = Awaited<ReturnType<typeof financeOverview>>;
 
@@ -73,6 +75,7 @@ export async function financeOverview(workspaceId: string, today: string, option
     statementRows,
     plan,
     plannedFixed,
+    personalAssets,
   ] = await Promise.all([
     prisma.account.findMany({
       where: { workspaceId, isArchived: false },
@@ -92,25 +95,25 @@ export async function financeOverview(workspaceId: string, today: string, option
     prisma.$queryRaw<PeriodRow[]>(Prisma.sql`
       SELECT date_trunc('month', "date") AS period, "type"::text AS type, SUM("amountCents")::bigint AS total
       FROM "FinanceTransaction"
-      WHERE "workspaceId"=${workspaceId} AND "source"<>'QUICK_INCOME' AND "date">=${previousStart} AND "date"<${tomorrow}
+      WHERE "workspaceId"=${workspaceId} AND "isConsumption"=true AND "source"<>'QUICK_INCOME' AND "date">=${previousStart} AND "date"<${tomorrow}
       GROUP BY 1,2 ORDER BY 1 ASC
     `),
     prisma.$queryRaw<DailyRow[]>(Prisma.sql`
       SELECT "date" AS day, "type"::text AS type, SUM("amountCents")::bigint AS total
       FROM "FinanceTransaction"
-      WHERE "workspaceId"=${workspaceId} AND "source"<>'QUICK_INCOME' AND "date">=${monthStart} AND "date"<${tomorrow}
+      WHERE "workspaceId"=${workspaceId} AND "isConsumption"=true AND "source"<>'QUICK_INCOME' AND "date">=${monthStart} AND "date"<${tomorrow}
       GROUP BY 1,2 ORDER BY 1 ASC
     `),
     prisma.financeTransaction.groupBy({
       by: ["categoryId"],
-      where: { workspaceId, type: "EXPENSE", date: currentRange },
+      where: { workspaceId, type: "EXPENSE", isConsumption: true, date: currentRange },
       _sum: { amountCents: true },
       orderBy: { _sum: { amountCents: "desc" } },
       take: 6,
     }),
     prisma.financeTransaction.groupBy({
       by: ["categoryId"],
-      where: { workspaceId, type: "EXPENSE", date: { gte: previousStart, lt: monthStart } },
+      where: { workspaceId, type: "EXPENSE", isConsumption: true, date: { gte: previousStart, lt: monthStart } },
       _sum: { amountCents: true },
     }),
     prisma.financeCategory.findMany({
@@ -118,8 +121,8 @@ export async function financeOverview(workspaceId: string, today: string, option
       select: { id: true, name: true },
     }),
     prisma.financeTransaction.findMany({
-      where: { workspaceId, type: "EXPENSE", date: currentRange },
-      select: { amountCents: true, description: true, merchant: true, recurring: true },
+      where: { workspaceId, type: "EXPENSE", isConsumption: true, date: currentRange },
+      select: { amountCents: true, description: true, merchant: true, recurring: true, subscriptionId: true },
     }),
     prisma.subscription.findMany({
       where: { workspaceId, status: "ACTIVE" },
@@ -149,7 +152,7 @@ export async function financeOverview(workspaceId: string, today: string, option
       SELECT b."id", c."name" AS category, b."limitCents", COALESCE(SUM(t."amountCents"),0)::bigint AS "spentCents"
       FROM "Budget" b
       JOIN "FinanceCategory" c ON c."id"=b."categoryId"
-      LEFT JOIN "FinanceTransaction" t ON t."workspaceId"=b."workspaceId" AND t."categoryId"=b."categoryId" AND t."type"='EXPENSE' AND t."date">=b."startDate" AND t."date"<=b."endDate"
+      LEFT JOIN "FinanceTransaction" t ON t."workspaceId"=b."workspaceId" AND t."isConsumption"=true AND t."categoryId"=b."categoryId" AND t."type"='EXPENSE' AND t."date">=b."startDate" AND t."date"<=b."endDate"
       WHERE b."workspaceId"=${workspaceId} AND b."startDate"<=${todayDate} AND b."endDate">=${todayDate}
       GROUP BY b."id", c."name", b."limitCents"
       ORDER BY b."limitCents" DESC
@@ -167,6 +170,7 @@ export async function financeOverview(workspaceId: string, today: string, option
     statementViewer ? cardStatementRows(statementViewer) : Promise.resolve<StatementRow[]>([]),
     prisma.financePlan.findUnique({ where: { workspaceId }, include: { receivingAccount: { select: { name: true, type: true, isArchived: true } } } }),
     prisma.fixedExpense.findMany({ where: { workspaceId, isActive: true }, orderBy: [{ dueDay: "asc" }, { name: "asc" }] }),
+    personalAssetRows(workspaceId),
   ]);
   const statements = summarizeCardStatements(statementRows, today);
   const positions = await creditCardPositions(workspaceId, today, statementRows);
@@ -258,16 +262,16 @@ export async function financeOverview(workspaceId: string, today: string, option
     ? sum + position.currentValueCents - position.bookCostCents + position.realizedPnlCents
     : sum + position.currentValueCents, 0);
   const investmentValueCents = investmentPositions.reduce((sum, position) => sum + position.currentValueCents, 0);
-  const netWorthCents = financialNetWorthCents + investmentAdjustmentCents;
+  const wealth = netWorthWithPersonalAssets(financialNetWorthCents + investmentAdjustmentCents, personalAssets);
   const totalSavingsCents = savingsGoals.reduce((sum, goal) => sum + goal.currentAmountCents, 0);
   const savingsTargetCents = savingsGoals.reduce((sum, goal) => sum + goal.targetAmountCents, 0);
 
   return {
     today,
     canExportReport: statementViewer?.role === "OWNER",
-    calendarStatements: statementRows.map(({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents }) => ({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents: detailedCents ?? 0 })),
+    calendarStatements: statementRows.map(({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents, rolledIntoStatementId }) => ({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents: detailedCents ?? 0, rolledIntoStatementId })),
     metrics: {
-      netWorthCents,
+      ...wealth,
       incomeCents: current.incomeCents,
       expensesCents: current.expensesCents,
       balanceCents: current.balanceCents,
@@ -299,6 +303,7 @@ export async function financeOverview(workspaceId: string, today: string, option
     banks: groupBankAccounts(accountRows).map(({ id, name, institution, cashCents, reserveCents, hasCash, accounts: products }) => ({ id, name, institution, cashCents, reserveCents, hasCash, cardCount: products.filter((account) => account.type === "CREDIT_CARD").length })),
     funding: statementViewer?.role === "OWNER" ? funding : null,
     plannedFixed: plannedFixed.map(({id,name,amountCents,dueDay,notes})=>({id,name,amountCents,dueDay,notes})),
+    personalAssets,
     creditCards,
     cardStatements: {
       openCount: statements.open.length,

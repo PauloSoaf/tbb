@@ -32,7 +32,7 @@ export function invoiceFunding(accounts: BankAccount[], statements: StatementRow
   const cardIds = new Set(actual.filter((account) => account.type === "CREDIT_CARD").map((account) => account.id));
   const registered = new Set(statements.filter((row) => row.kind === "STATEMENT").map((row) => row.accountId));
   const missingStatementCount = [...cardIds].filter((id) => !registered.has(id)).length;
-  const known = statements.filter((row) => cardIds.has(row.accountId) && row.kind === "STATEMENT" && (row.status === "OPEN" || row.status === "FUTURE_KNOWN"));
+  const known = statements.filter((row) => !row.rolledIntoStatementId && cardIds.has(row.accountId) && row.kind === "STATEMENT" && (row.status === "OPEN" || row.status === "FUTURE_KNOWN"));
   const open = known.filter((row) => row.status === "OPEN");
   const openCents = open.reduce((sum, row) => sum + row.amountCents, 0);
   const availableCents = Math.max(0, cashCents);

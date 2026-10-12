@@ -1,0 +1,19 @@
+.personal-assets-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.personal-asset-card { min-width: 0; overflow-wrap: anywhere; }
+.personal-asset-icon { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; border-radius: 12px; color: var(--accent); background: var(--muted); }
+.personal-asset-value { display: block; font-size: 1.5rem; margin: 4px 0; }
+.personal-assets-summary { display: flex; align-items: center; gap: 32px; flex-wrap: wrap; }
+.personal-assets-summary strong { display: block; font-size: 1.45rem; }
+.personal-assets-summary p { flex: 1; min-width: min(100%, 180px); }
+.personal-asset-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.personal-asset-form-row > label { min-width: 0; }
+.personal-asset-debt { padding: 12px; border: 1px solid var(--border); border-radius: 10px; font-size: .85rem; }
+.personal-asset-debt small { display: block; margin-top: 4px; }
+.personal-asset-notes { white-space: pre-wrap; }
+.personal-asset-actions { margin-top: auto; flex-wrap: wrap; }
+.personal-assets-archived summary { cursor: pointer; margin-bottom: 16px; }
+@media (max-width: 480px) {
+  .personal-asset-form-row { grid-template-columns: 1fr; }
+  .personal-assets-summary { gap: 18px; }
+  .personal-assets-page .page-header { align-items: flex-start; }
+}

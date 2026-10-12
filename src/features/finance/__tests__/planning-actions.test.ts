@@ -5,6 +5,7 @@ vi.mock('@/lib/tenancy/requirePermission',()=>({requirePermission:mocks.permissi
 vi.mock('@/lib/prisma',()=>({prisma:{$transaction:mocks.transaction,account:{findFirst:mocks.account},fixedExpense:{updateMany:mocks.fixedUpdate}}}));
 import {archiveFixedExpense,receiveMonthlyIncome,saveFixedExpense,saveMonthlyIncome} from '../actions';
 import {exportFinancialReport} from '../report-actions';
+vi.mock('server-only',()=>({}));
 const form=(fields:Record<string,string>)=>{const fd=new FormData();for(const [key,value]of Object.entries(fields))fd.set(key,value);return fd;};
 beforeEach(()=>{
   vi.resetAllMocks();vi.useFakeTimers();vi.setSystemTime(new Date('2032-01-10T16:00:00Z'));

@@ -132,6 +132,7 @@ export function ThemeToggle({ className = "", showLabel = false }: { className?:
   ];
 
   const handleThemeChange = (newTheme: string) => {
+    if (newTheme === theme) { setIsOpen(false); return; }
     document.documentElement.classList.remove(...THEME_CLASS_NAMES, CUSTOM_DARK_CLASS);
     setTheme(newTheme);
     setIsOpen(false);

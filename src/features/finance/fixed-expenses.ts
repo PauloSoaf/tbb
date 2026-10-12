@@ -4,9 +4,11 @@ type RecurringExpense = {
   amountCents: number;
   description: string;
   merchant: string | null;
+  subscriptionId?: string | null;
 };
 
 type ActiveSubscription = {
+  id?: string;
   name: string;
   merchant: string | null;
   amountCents: number;
@@ -42,6 +44,7 @@ export function calculateFixedExpenses(
   const unmatchedRecurring = recurring.filter((item) => ![normalized(item.description), normalized(item.merchant)].some((value) => value && plannedNames.includes(value)));
   const allNames = [...recurringNames, ...plannedNames];
   const unmatchedSubscriptions = subscriptions.filter((subscription) => {
+    if (subscription.id && recurring.some(item => item.subscriptionId === subscription.id)) return false;
     const candidates = [normalized(subscription.name), normalized(subscription.merchant)].filter(Boolean);
     return !candidates.some((candidate) => allNames.some((posted) => posted === candidate));
   });

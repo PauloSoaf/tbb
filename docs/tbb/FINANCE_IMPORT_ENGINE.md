@@ -1,10 +1,10 @@
 # Finance Import Engine
 
-Entradas CSV, PDF textual e clipboard convergem para ImportBatch. O fluxo é Upload/Paste → Parse → Map → Normalize → Validate → Rules → Deduplicate → Preview → Confirm → Report.
+O importador tabular de extratos (CSV/clipboard/PDF legado) e a revisão de documentos financeiros usam `ImportBatch`. Para cartões, use **Documentos e conciliação**, que distingue compras, parcelas, estornos, pagamentos, financiamento e encargos. CSV de cartão não passa pelo modo `SIGNED` do importador legado. O fluxo é upload → extração → normalização → conta existente → revisão das diferenças → decisões → confirmação do subconjunto → relatório. Veja [o contrato de conciliação multiformato](FINANCE_DOCUMENT_RECONCILIATION.md).
 
 O parser preserva aspas, células vazias, UTF-8, vírgulas em descrições e delimitadores vírgula, ponto e vírgula ou tab. Datas BR/ISO e dinheiro BR/EUA são normalizados com testes de precisão.
 
-O fingerprint usa workspace, conta, data, valor, tipo e descrição normalizada, ou externalId quando presente. A origem não participa, então dedup funciona entre canais.
+O fingerprint `content-v1` do importador tabular continua usando workspace, conta, data, valor, tipo e descrição normalizada, ou externalId quando presente. No fluxo de documentos, a identidade usa workspace + conta + hash do original + localizador da ocorrência (`source-row-v2`), ou um identificador efetivamente fornecido pelo banco. Duas compras legítimas idênticas em posições diferentes não são descartadas; outras fontes precisam de vínculo de evidência confirmado.
 
 Preview e mapping ficam no batch para lotes de até 5.000 linhas; arquivos originais grandes não são mantidos depois da confirmação. Linhas inválidas e duplicadas não são importadas. Rollback remove somente transações do batch com revisão zero e preserva as editadas depois.
 
@@ -18,4 +18,4 @@ A importação não escreve em FinanceTransaction nem Debt. Ela pode ler os deta
 
 Reimportar um arquivo idêntico resulta em `KEEP` sem escrever faturas, contas ou eventos de auditoria. A confirmação exige o fingerprint da prévia e rejeita mudanças intervenientes no plano; pular conflitos depende da opção explícita da confirmação. As server actions autorizam somente OWNER e obtêm workspace e ator da sessão, ignorando ids de workspace enviados no formulário. O limite compartilhado por Finance, Contas e Faturas e as regras de leitura privada também estão descritos no modelo de dados.
 
-Testes e QA usam dados sintéticos. Verificações de dados pessoais são somente leitura; backups, arquivos de sessão, JSONs privados e screenshots locais ficam em `.data/`, ignorada pelo git. O QA com gravações usa um banco descartável com `DATABASE_URL` **e** `DIRECT_URL` apontando para ele, pois o CLI do Prisma usa a URL direta nas migrations.
+Testes de CI usam dados sintéticos e QA de gravação usa banco descartável com `DATABASE_URL` **e** `DIRECT_URL` próprios. Importar dados pessoais de verdade exige autorização do titular, backup verificado, identificação do workspace pela sessão e revisão de cada origem. Backups, sessões, relatórios privados, JSONs e screenshots ficam em `.data/`, ignorada pelo git. Nunca use dados pessoais como fixtures públicas.

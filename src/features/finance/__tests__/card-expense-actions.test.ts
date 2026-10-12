@@ -93,6 +93,11 @@ describe("card expense writes",()=>{
     expect(await saveCardExpense(expense({amount:"20,00",installments:"1",link:"ADDED_TO_STATEMENT"}))).toHaveProperty("success");
     expect(mocks.audit.mock.calls[0][0].data.metadata).toMatchObject({statementTotalBefore:11000,statementTotalAfter:13000});
   });
+  it("keeps confirmed refunds signed when adding already included expense detail",async()=>{
+    mocks.linked.mockResolvedValue([{amountCents:9000,statementDetailMode:"ALREADY_INCLUDED",type:"EXPENSE"},{amountCents:1000,statementDetailMode:"ADDED_TO_STATEMENT",type:"EXPENSE"},{amountCents:2000,statementDetailMode:"ALREADY_INCLUDED",type:"REFUND"}]);
+    expect(await saveCardExpense(expense({amount:"20,00",installments:"1"}))).toHaveProperty("success");
+    expect(mocks.audit.mock.calls[0][0].data.metadata).toMatchObject({statementTotalBefore:11000,statementTotalAfter:11000});
+  });
   it("keeps paid bills immutable",async()=>{
     mocks.statementRef.mockResolvedValue(statement({status:"PAID"}));
     expect(await saveCardExpense(expense({link:"ADDED_TO_STATEMENT"}))).toMatchObject({error:expect.stringContaining("já foi paga")});
@@ -112,7 +117,7 @@ describe("card expense writes",()=>{
 describe("updating a statement link",()=>{
   it("excludes the purchase itself when checking a new classification",async()=>{
     expect(await updateStatementLink(form({transactionId:"purchase",statementId:"s1",mode:"ALREADY_INCLUDED",workspaceId:"w2"}))).toHaveProperty("success");
-    expect(mocks.linked.mock.calls[0][0].where).toEqual({workspaceId:"w1",cardStatementId:"s1",type:"EXPENSE",id:{not:"purchase"}});
+    expect(mocks.linked.mock.calls[0][0].where).toEqual({workspaceId:"w1",cardStatementId:"s1",type:{in:["EXPENSE","REFUND"]},id:{not:"purchase"}});
     expect(mocks.update.mock.calls[0][0]).toMatchObject({where:{id:"purchase",workspaceId:"w1"},data:{cardStatementId:"s1",statementDetailMode:"ALREADY_INCLUDED",revision:{increment:1}}});
   });
   it("unlinks both fields together",async()=>{

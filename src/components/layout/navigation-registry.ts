@@ -5,7 +5,7 @@ import { adminItem, navGroups } from "./navigation";
 const NAV_KEYS: Record<string, string> = {
   "/today": "today", "/habits": "habits", "/tasks": "tasks", "/goals": "goals", "/projects": "projects", "/calendar": "calendar",
   "/finance": "overview", "/finance/transactions": "transactions", "/finance/calendar": "spending_calendar", "/finance/accounts": "accounts", "/finance/budgets": "budgets",
-  "/finance/subscriptions": "subscriptions", "/finance/debts": "debts", "/finance/statements": "statements", "/finance/savings": "savings",
+  "/finance/subscriptions": "subscriptions", "/finance/debts": "debts", "/finance/statements": "statements", "/finance/savings": "savings", "/finance/assets": "personal_assets",
   "/finance/investments": "investments", "/finance/reports": "reports", "/career": "overview", "/career/applications": "applications",
   "/career/companies": "companies", "/career/interviews": "interviews", "/career/contacts": "contacts", "/career/documents": "documents",
   "/insights": "insights", "/integrations": "integrations", "/settings": "settings", "/admin": "admin",

@@ -83,7 +83,7 @@ export function cardLimitInput(input: {
   const uncovered = coverage ? ledger.unlinked.filter((item) => item.date >= coverage) : [];
   const unreconciled = Math.max(0, uncovered.reduce((sum, item) => sum + (item.type === "EXPENSE" ? item.amountCents : -item.amountCents), 0));
   const pendingCents = statements.filter((row) => row.status === "FORECAST" && row.reconciliation === "PENDING").reduce((sum, row) => sum + row.amountCents, 0);
-  const stale = statements.some((row) => row.status === "FUTURE_KNOWN" && (row.dueDate || "") < today);
+  const stale = statements.some((row) => row.status === "FUTURE_KNOWN" && (!row.dueDate || row.dueDate < today));
   return {
     limitCents: input.limitCents, openCents: totals.openCents, futureCents: totals.futureKnownCents, unreconciledCents: unreconciled,
     forecastCents: totals.forecastCents, pendingCents, incomplete: stale || (!coverage && ledger.unlinked.length > 0), referenceDate: today, source: "STATEMENTS",

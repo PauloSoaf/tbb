@@ -72,6 +72,7 @@ model Workspace {
   budgets                       Budget[]
   subscriptions                 Subscription[]
   debts                         Debt[]
+  personalAssets                PersonalAsset[]
   savingsGoals                  SavingsGoal[]
   importBatches                 ImportBatch[]
   importMappings                ImportMapping[]
@@ -121,6 +122,9 @@ model Workspace {
   partnerConnectionsAsRequester PartnerConnection[]           @relation("PartnerConnectionRequester")
   partnerConnectionsAsReceiver  PartnerConnection[]           @relation("PartnerConnectionReceiver")
   partnerSharingPolicies        PartnerSharingPolicy[]
+  financialSources              FinancialSource[]
+  statementPayments             CardStatementPayment[]
+  financialSnapshots            FinancialSnapshot[]
 }
 
 model Membership {
@@ -534,6 +538,9 @@ model Account {
   fundedInvestmentTransactions InvestmentTransaction[] @relation("InvestmentFundingAccount")
   cardStatements               CardStatement[]
   incomePlans                  FinancePlan[]
+  financialSources             FinancialSource[]
+  statementPayments            CardStatementPayment[]
+  financialSnapshots           FinancialSnapshot[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, isArchived])
@@ -615,12 +622,18 @@ model CardStatement {
   overlapsStatement   CardStatement?              @relation("CardStatementOverlap", fields: [overlapsStatementId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
   overlappedBy        CardStatement[]             @relation("CardStatementOverlap")
   transactions        FinanceTransaction[]
+  payments            CardStatementPayment[]
+  rolledIntoStatementId String?
+  rolledIntoStatement CardStatement? @relation("StatementRollover", fields: [rolledIntoStatementId, accountId, workspaceId], references: [id, accountId, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  rolledFrom          CardStatement[] @relation("StatementRollover")
+  amountIsOutstanding Boolean @default(false)
 
   @@unique([id, workspaceId])
   @@unique([id, accountId, workspaceId])
   @@unique([workspaceId, externalKey])
   @@unique([workspaceId, accountId, periodKey])
   @@index([workspaceId, status, dueDate])
+  @@index([rolledIntoStatementId, accountId, workspaceId])
 }
 
 model FinanceCategory {
@@ -672,6 +685,17 @@ model FinanceTransaction {
   cardStatementId        String?
   statementDetailMode    StatementDetailMode?
   revision               Int                     @default(0)
+  purchasedDate          DateTime?               @db.Date
+  postedDate             DateTime?               @db.Date
+  occurredAt             DateTime?
+  occurredTimezone       String?
+  dateBasis              String                  @default("MANUAL")
+  eventKind              String                  @default("PURCHASE")
+  isConsumption          Boolean                 @default(true)
+  originalAmountCents    Int?
+  originalCurrency       String?
+  exchangeRate           String?
+  subscriptionId         String?
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   workspace              Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -683,12 +707,15 @@ model FinanceTransaction {
   importBatch            ImportBatch?            @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
   investmentTransactions InvestmentTransaction[] @relation("InvestmentFinanceTransaction")
   investmentIncomeLinks  InvestmentIncome[]      @relation("InvestmentIncomeFinanceTransaction")
+  evidence               FinancialEvidence[]
+  subscription           Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
 
   @@unique([workspaceId, fingerprint])
   @@index([workspaceId, date])
   @@index([workspaceId, accountId, date])
   @@index([workspaceId, importBatchId])
   @@index([workspaceId, cardStatementId])
+  @@index([subscriptionId])
 }
 
 // How a card purchase relates to the statement it is detailed under: already part of the
@@ -729,12 +756,17 @@ model Subscription {
   categoryId     String?
   startedAt      DateTime         @db.Date
   status         String           @default("ACTIVE")
+  nextChargeIsEstimate Boolean @default(false)
+  amountIsEstimate Boolean @default(false)
+  originalAmountCents Int?
+  originalCurrency String?
   notes          String?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
   workspace      Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   account        Account?         @relation(fields: [accountId], references: [id], onDelete: SetNull)
   category       FinanceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  transactions   FinanceTransaction[]
 
   @@index([workspaceId, status, nextChargeDate])
 }
@@ -757,8 +789,38 @@ model Debt {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
   workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  personalAssets        PersonalAsset[]
 
   @@index([workspaceId, status])
+}
+
+enum PersonalAssetKind {
+  VEHICLE
+  ELECTRONIC
+  PROPERTY
+  OTHER
+}
+
+model PersonalAsset {
+  id                 String            @id @default(cuid())
+  workspaceId        String
+  name               String
+  kind               PersonalAssetKind
+  valueCents         Int
+  valuationDate      DateTime          @db.Date
+  purchaseValueCents Int?
+  purchaseDate       DateTime?         @db.Date
+  notes              String?
+  debtId             String?
+  archivedAt         DateTime?
+  version            Int               @default(1)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  workspace          Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  debt               Debt?             @relation(fields: [debtId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, archivedAt])
+  @@index([debtId])
 }
 
 model SavingsGoal {
@@ -817,6 +879,96 @@ model ImportMapping {
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, name])
+}
+
+// Originals and candidate evidence are private to the workspace owner. Source identities
+// use content hash + account; row identities never masquerade as an issuer external ID.
+model FinancialSource {
+  id String @id @default(cuid())
+  workspaceId String
+  accountId String
+  sha256 String
+  fileName String
+  mediaType String
+  content Bytes
+  byteLength Int
+  importBatchId String?
+  createdAt DateTime @default(now())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId, workspaceId], references: [id, workspaceId], onDelete: NoAction)
+  evidence FinancialEvidence[]
+  snapshots FinancialSnapshot[]
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, accountId, sha256])
+  @@index([importBatchId])
+}
+
+model FinancialEvidence {
+  id String @id @default(cuid())
+  workspaceId String
+  sourceId String
+  locator String
+  candidate Json
+  originalCandidate Json
+  version Int @default(1)
+  decision String @default("NEEDS_REVIEW")
+  reason String?
+  transactionId String?
+  paymentId String?
+  importBatchId String?
+  reviewedByUserId String?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  source FinancialSource @relation(fields: [sourceId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  transaction FinanceTransaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  payment CardStatementPayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  @@unique([sourceId, locator])
+  @@index([workspaceId, decision])
+  @@index([transactionId])
+  @@index([paymentId])
+  @@index([importBatchId])
+}
+
+model FinancialSnapshot {
+  id String @id @default(cuid())
+  workspaceId String
+  accountId String
+  sourceId String
+  locator String
+  asOfDate DateTime @db.Date
+  kind String
+  payload Json
+  statementId String?
+  createdAt DateTime @default(now())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId, workspaceId], references: [id, workspaceId], onDelete: NoAction)
+  source FinancialSource @relation(fields: [sourceId, workspaceId], references: [id, workspaceId], onDelete: NoAction)
+  @@unique([sourceId, locator])
+  @@index([workspaceId, accountId, kind, asOfDate])
+  @@index([statementId])
+}
+
+// Issuer payment evidence changes the liability; never salary or fabricated cash movement.
+model CardStatementPayment {
+  id String @id @default(cuid())
+  workspaceId String
+  accountId String
+  cardStatementId String?
+  fingerprint String
+  amountCents Int
+  date DateTime @db.Date
+  sourceId String
+  locator String
+  importBatchId String?
+  createdAt DateTime @default(now())
+  evidence FinancialEvidence[]
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId, workspaceId], references: [id, workspaceId], onDelete: NoAction)
+  cardStatement CardStatement? @relation(fields: [cardStatementId, accountId, workspaceId], references: [id, accountId, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  @@unique([workspaceId, fingerprint])
+  @@index([cardStatementId, accountId, workspaceId])
+  @@index([workspaceId, accountId, date])
+  @@index([importBatchId])
 }
 
 model TransactionRule {

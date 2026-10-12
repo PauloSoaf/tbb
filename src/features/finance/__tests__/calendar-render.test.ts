@@ -16,11 +16,13 @@ const props = { today: "2032-02-29", initialMonth: { month: "2032-02", entries: 
 const render = (extra: Partial<Parameters<typeof FinanceSpendingCalendar>[0]> = {}) => renderToStaticMarkup(createElement(FinanceSpendingCalendar, { ...props, ...extra }));
 beforeEach(() => { state.search = "month=2032-02&day=2032-02-29"; });
 describe("calendar presentation", () => {
-  it("initially shows only the compact strip and keeps dashboard query parameters independent", () => {
+  it("shows a compact seven-column month with collapsed details and independent dashboard parameters", () => {
     state.search = "scope=me&month=2040-07&day=2040-07-12";
     const html = render({ compact: true });
-    expect(html.match(/class="finance-cal-mini-day"/g)).toHaveLength(29);
-    expect(html).not.toContain('class="finance-cal-days"');
+    expect(html.match(/class="finance-cal-day"/g)).toHaveLength(35);
+    expect(html).toContain('class="finance-cal-days"');
+    expect(html).toContain('class="finance-cal-weekdays"');
+    expect(html).not.toContain('class="finance-cal-mini-track"');
     expect(html).not.toContain('class="finance-cal-day-panel"');
     expect(html).toContain('/finance/calendar?month=2032-02&amp;day=2032-02-29');
   });
@@ -61,5 +63,28 @@ describe("calendar presentation", () => {
     const adjacent = [...html.matchAll(/<button[^>]*data-day="9998-12-[^"]+"[^>]*>/g)].map(match => match[0]);
     expect(adjacent.length).toBeGreaterThan(0);
     expect(adjacent.every(button => button.includes('disabled=""'))).toBe(true);
+  });
+  it.each([false, true])("shows bill due markers separately from ledger totals (compact=%s)", compact => {
+    state.search = "month=2032-02&day=2032-02-29";
+    const statement: CardExpenseStatement = { id: "synthetic-bill", accountId: "card", kind: "STATEMENT", status: "OPEN", dueDate: "2032-02-29", closingDate: null, closingDay: null, referenceMonth: null, amountCents: 123456, detailedCents: 0 };
+    const html = render({ compact, statements: [statement], accounts: [{ id: "card", name: "Cartão sintético", type: "CREDIT_CARD" }], canManageCards: true });
+    expect(html).toContain('data-bills="true"');
+    expect(html).toContain('class="finance-cal-bill-badge"');
+    expect(html).toContain("Faturas a pagar");
+    expect(html).toContain("1.234,56");
+    expect(html).toContain("Cartão sintético");
+    expect(html).not.toContain('class="finance-cal-entry"');
+    if (!compact) expect(html).toContain('class="finance-cal-bill-entry"');
+  });
+  it("does not show private bill markers when the viewer cannot manage cards", () => {
+    const statement: CardExpenseStatement = { id: "private", accountId: "card", kind: "STATEMENT", status: "OPEN", dueDate: "2032-02-29", closingDate: null, closingDay: null, referenceMonth: null, amountCents: 123456, detailedCents: 0 };
+    const html = render({ statements: [statement], canManageCards: false });
+    expect(html).not.toContain('data-bills="true"');
+    expect(html).not.toContain('class="finance-cal-dues-total"');
+    expect(html).not.toContain("1.234,56");
+  });
+  it("preserves cents for smaller bill amounts in the compact cells", () => {
+    const statement: CardExpenseStatement = { id: "small", accountId: "card", kind: "STATEMENT", status: "OPEN", dueDate: "2032-02-29", closingDate: null, closingDay: null, referenceMonth: null, amountCents: 12549, detailedCents: 0 };
+    expect(render({ compact: true, statements: [statement], canManageCards: true })).toContain('125,49');
   });
 });

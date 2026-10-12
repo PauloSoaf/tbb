@@ -358,6 +358,7 @@ export type StatementRow = {
   reconciliation: CardStatementReconciliation; overlapsStatementId: string | null; notes: string | null;
   /** `amountCents` is the bill total: the declared amount plus expenses added on top of it. */
   version?: string; declaredCents?: number; addedCents?: number; detailedCents?: number; detailCount?: number;
+  paidCents?: number; rolledIntoStatementId?: string | null; amountIsOutstanding?: boolean;
 };
 export type CardTotals = {
   accountName: string; openCents: number; openCount: number; overdue: boolean; nextDueDate: string | null; closingDate: string | null; closingDay: number | null;
@@ -368,9 +369,10 @@ export type CardTotals = {
  * are reported separately; a forecast pending reconciliation never adds to any total. */
 export function summarizeCardStatements(rows: StatementRow[], today: string) {
   const byDue = (a: StatementRow, b: StatementRow) => (a.dueDate || "").localeCompare(b.dueDate || "") || a.accountName.localeCompare(b.accountName);
-  const open = rows.filter((row) => row.status === "OPEN").sort(byDue).map((row) => ({ ...row, overdue: (row.dueDate || "") < today }));
+  const open = rows.filter((row) => row.status === "OPEN" && !row.rolledIntoStatementId).sort(byDue).map((row) => ({ ...row, overdue: (row.dueDate || "") < today }));
+  const carried = rows.filter(row => row.rolledIntoStatementId);
   const paid = rows.filter((row) => row.status === "PAID").sort((a, b) => byDue(b, a));
-  const futureKnown = rows.filter((row) => row.status === "FUTURE_KNOWN").sort(byDue).map((row) => ({ ...row, awaitingUpdate: (row.dueDate || "") < today }));
+  const futureKnown = rows.filter((row) => row.status === "FUTURE_KNOWN").sort(byDue).map((row) => ({ ...row, awaitingUpdate: Boolean(row.dueDate && row.dueDate < today) }));
   const forecasts = rows.filter((row) => row.status === "FORECAST")
     .sort((a, b) => (a.referenceMonth || "").localeCompare(b.referenceMonth || "") || a.accountName.localeCompare(b.accountName))
     .map((row) => ({ ...row, counted: row.reconciliation === "NOT_REQUIRED" || row.reconciliation === "SEPARATE_CHARGE" }));
@@ -394,12 +396,13 @@ export function summarizeCardStatements(rows: StatementRow[], today: string) {
   const months = new Map<string, { month: string; openCents: number; futureKnownCents: number; forecastCents: number; pendingCents: number }>();
   const month = (key: string) => months.get(key) ?? months.set(key, { month: key, openCents: 0, futureKnownCents: 0, forecastCents: 0, pendingCents: 0 }).get(key)!;
   for (const row of open) month((row.dueDate || "").slice(0, 7)).openCents += row.amountCents;
-  for (const row of futureKnown) month((row.dueDate || "").slice(0, 7)).futureKnownCents += row.amountCents;
+  for (const row of futureKnown) month(row.dueDate ? row.dueDate.slice(0, 7) : row.referenceMonth || "unknown").futureKnownCents += row.amountCents;
   for (const row of forecasts) {
     if (row.reconciliation === "INCLUDED_IN_STATEMENT") continue; // already inside the linked statement
     month(row.referenceMonth || "")[row.counted ? "forecastCents" : "pendingCents"] += row.amountCents;
   }
   return {
+    carried,
     openCents: sumCents(open),
     overdueCents: sumCents(open.filter((row) => row.overdue)),
     dueDates: [...new Set(open.map((row) => row.dueDate || ""))],

@@ -1,5 +1,7 @@
 # Navegação do aplicativo
 
+`/finance/assets` aparece em Dinheiro → Bens, com traduções PT/EN/ES, breadcrumb e destino de Voltar em `/finance`. A visão geral também oferece acesso pelo indicador Patrimônio e pelo menu Mais.
+
 `navigation-registry.ts` resolve a trilha de breadcrumb, o pai usado como destino alternativo de Voltar e os parâmetros que devem acompanhar links ancestrais. Os rótulos do menu vêm de `navigation.ts` e das traduções; Admin, importações, revisão semanal, convite de parceiro e rotas de detalhe têm resolução explícita. Rotas desconhecidas usam o ancestral registrado mais próximo, ou Hoje quando não há ancestral.
 
 Detalhes de hábito e candidatura passam o título amigável já carregado pela página para `BreadcrumbTitle`; o breadcrumb nunca mostra o id da URL nem consulta o banco para obter outro nome. Se o título ainda não chegou, aparece um rótulo traduzido. A página atual recebe `aria-current="page"`; ancestrais navegáveis são links. `scope` acompanha links ancestrais de investimentos, sem copiar filtros não declarados.

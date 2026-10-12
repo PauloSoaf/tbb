@@ -13,10 +13,27 @@ export type FinanceCalendarEntry = {
   categoryName: string | null;
   isCardPurchase: boolean;
   cardStatementId: string | null;
+  postedDate?: string | null;
+  occurredAt?: string | null;
+  occurredTimezone?: string | null;
 };
 export type FinanceCalendarMonth = { month: string; entries: FinanceCalendarEntry[] };
 export type FinanceCalendarOption = { id: string; name: string; type?: string };
 export type FinanceCalendarCategory = { id: string; name: string; type: string };
+export type CalendarStatement = { id: string; accountId: string; kind: string; status: string; dueDate: string | null; amountCents: number; rolledIntoStatementId?: string | null };
+
+/** Known unpaid bills are due-date commitments, independent of daily ledger spending. */
+export function calendarStatementDues(statements: CalendarStatement[]): Record<string, CalendarStatement[]> {
+  const days: Record<string, CalendarStatement[]> = {};
+  for (const statement of statements) {
+    if (statement.rolledIntoStatementId || statement.kind !== "STATEMENT" || !["OPEN", "FUTURE_KNOWN"].includes(statement.status) ||
+      !statement.dueDate || !isDateKey(statement.dueDate) || statement.amountCents <= 0) continue;
+    const due = days[statement.dueDate] ?? [];
+    if (!due.some(item => item.id === statement.id)) due.push(statement);
+    days[statement.dueDate] = due;
+  }
+  return days;
+}
 export type DayAmounts = { expenseCents: number; incomeCents: number; scheduledExpenseCents: number; scheduledIncomeCents: number; count: number };
 export const emptyDayAmounts = (): DayAmounts => ({ expenseCents: 0, incomeCents: 0, scheduledExpenseCents: 0, scheduledIncomeCents: 0, count: 0 });
 

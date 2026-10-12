@@ -21,10 +21,10 @@ export async function financeCalendarMonth(workspaceId: string, month: string, s
   const start = dateKeyToUTC(`${month}-01`);
   const end = dateKeyToUTC(`${shiftMonth(month, 1)}-01`);
   const rows = await prisma.financeTransaction.findMany({
-    where: { workspaceId, date: { gte: start, lt: end }, source: { not: "QUICK_INCOME" } },
+    where: { workspaceId, isConsumption: true, date: { gte: start, lt: end }, source: { not: "QUICK_INCOME" } },
     select: {
       id: true, date: true, description: true, merchant: true, amountCents: true,
-      type: true, source: true, cardStatementId: true,
+      type: true, source: true, cardStatementId: true, postedDate: true, occurredAt: true, occurredTimezone: true,
       account: { select: { name: true, type: true } },
       category: { select: { name: true } },
     },
@@ -44,6 +44,9 @@ export async function financeCalendarMonth(workspaceId: string, month: string, s
       categoryName: row.category?.name || null,
       isCardPurchase: row.account.type === "CREDIT_CARD",
       cardStatementId: showStatementLinks ? row.cardStatementId : null,
+      postedDate: row.postedDate?.toISOString().slice(0, 10) || null,
+      occurredAt: row.occurredAt?.toISOString() || null,
+      occurredTimezone: row.occurredTimezone,
     })),
   };
 }

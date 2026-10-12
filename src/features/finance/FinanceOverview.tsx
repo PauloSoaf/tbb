@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { personalAssetCopy } from "./personal-asset-copy";
 import NumberFlow from "@number-flow/react";
 import {
   AlertTriangle,
@@ -26,9 +27,8 @@ import { RevealOnScroll } from "@/components/ui/RevealOnScroll";
 import { FinanceCategoryChart, FinanceDailyCashFlowChart, FinanceIncomeUsageChart } from "@/components/TbbCharts";
 import { useI18n } from "@/lib/i18n/I18nContext";
 import { NaturalLanguageCapture } from "./NaturalLanguageCapture";
-import { CompactMonthlyIncome } from "./CompactMonthlyIncome";
+import { FinancePlanningRow } from "./FinancePlanningRow";
 import { CreditLimitBreakdown } from "./CreditLimitBreakdown";
-import { InvoiceFundingPanel } from "./InvoiceFundingPanel";
 import { FixedExpensesDialog } from "./FixedExpensesDialog";
 import { AppTooltip } from "@/components/ui/AppTooltip";
 import { FinanceOverviewHeader } from "./FinanceOverviewHeader";
@@ -53,6 +53,7 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
   const currency = (cents: number) => new Intl.NumberFormat(language, { style: "currency", currency: "BRL", maximumFractionDigits: cents % 100 ? 2 : 0 }).format(cents / 100);
   const date = (day: string) => new Intl.DateTimeFormat(language, { day: "2-digit", month: "short", timeZone: "UTC" }).format(new Date(`${day}T00:00:00.000Z`)).replace(".", "");
   const metrics = data.metrics;
+  const assetCopy = personalAssetCopy(locale);
   const incomeUse = percent(metrics.committedIncomeCents, metrics.incomeReferenceCents);
   const goalProgress = metrics.savingsTargetCents ? Math.min(100, percent(metrics.totalSavingsCents, metrics.savingsTargetCents)) : 0;
   const daysInMonth = new Date(Number(data.today.slice(0, 4)), Number(data.today.slice(5, 7)), 0).getDate();
@@ -60,7 +61,7 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
   const projection = elapsed ? Math.round(metrics.expensesCents / elapsed * daysInMonth) : metrics.expensesCents;
 
   const kpis = [
-    { label: t("netWorth"), value: metrics.netWorthCents, context: `${data.accounts.filter((account) => !account.unassigned).length} ${t("acrossAccounts")}`, icon: Landmark, tone: "primary" },
+    { label: t("netWorth"), value: metrics.netWorthCents, context: assetCopy.composition, icon: Landmark, tone: "primary" },
     { label: "Receitas recebidas", value: metrics.incomeCents, context: "Recebimentos registrados até hoje neste mês", icon: ArrowDownLeft, tone: "success" },
     { label: t("expenses"), value: metrics.expensesCents, context: "Despesas registradas até hoje neste mês", icon: ArrowUpRight, tone: "danger" },
     { label: "Saldo atual em contas", value: metrics.cashBalanceCents, context: `Dinheiro para usar · reservas ${currency(metrics.reserveBalanceCents)} à parte`, icon: metrics.cashBalanceCents >= 0 ? TrendingUp : TrendingDown, tone: metrics.cashBalanceCents >= 0 ? "success" : "danger" },
@@ -90,16 +91,14 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
         {kpis.map((item, index) => <RevealOnScroll key={item.label} delay={index * .035} className="finance-kpi-reveal">
           <article className="finance-kpi" data-tone={item.tone}>
             <span className="finance-kpi-icon"><item.icon size={16}/></span>
-            <div><small>{item.label}</small><strong><NumberFlow value={item.value / 100} format={{ style: "currency", currency: "BRL", maximumFractionDigits: item.value % 100 ? 2 : 0 }} locales={language}/></strong><span>{item.context}</span></div>
+            <div><small>{item.label}</small><strong><NumberFlow value={item.value / 100} format={{ style: "currency", currency: "BRL", maximumFractionDigits: item.value % 100 ? 2 : 0 }} locales={language}/></strong>{index === 0 ? <AppTooltip content={<div><p>{assetCopy.financial}: {currency(metrics.financialNetWorthCents)}</p><p>{assetCopy.physical}: {currency(metrics.personalAssetsCents)}</p><p>{assetCopy.netWorthHint}</p><p>{assetCopy.liquidHint}</p></div>}><Link href="/finance/assets" className="finance-wealth-assets-link">{data.personalAssets.length ? `${assetCopy.assets}: ${currency(metrics.personalAssetsCents)} · ${assetCopy.view}` : assetCopy.newAsset} →</Link></AppTooltip> : <span>{item.context}</span>}</div>
           </article>
         </RevealOnScroll>)}
       </section>
 
-      <RevealOnScroll><FinanceSpendingCalendar compact initialMonth={calendar} today={data.today} accounts={captureAccounts} categories={calendarCategories} statements={data.calendarStatements} canWrite={calendarCanWrite} canManageCards={data.canExportReport}/></RevealOnScroll>
-      <RevealOnScroll><CompactMonthlyIncome accounts={captureAccounts.filter((a)=>["CHECKING","CASH","DIGITAL_WALLET"].includes(a.type||""))} today={data.today} {...data.monthlyIncome}/></RevealOnScroll>
-      {data.funding && data.creditCards.length > 0 && <InvoiceFundingPanel funding={data.funding} compact/>}
+      <RevealOnScroll><FinancePlanningRow income={{ accounts: captureAccounts.filter((a)=>["CHECKING","CASH","DIGITAL_WALLET"].includes(a.type||"")), today: data.today, ...data.monthlyIncome }} funding={data.creditCards.length > 0 ? data.funding : null}/></RevealOnScroll>
 
-      <section id="contas" className="finance-accounts-grid">
+      <section id="contas" className="finance-accounts-grid has-calendar">
         <RevealOnScroll><article className="finance-overview-card finance-account-card">
           <header className="finance-card-heading"><div><span className="finance-card-icon"><Landmark size={17}/></span><div><h2>{t("accountSummary")}</h2><p>{t("accountHint")}</p></div></div><Link href="/finance/accounts">{t("seeAll")}<ArrowRight size={14}/></Link></header>
           <div className="finance-account-list">{data.banks.slice(0, 6).map((bank) => <Link href={`/finance/accounts#banco-${bank.id}`} key={bank.id}><span className="finance-account-mark"><WalletCards size={16}/></span><span><strong>{bank.name}</strong><small>{bank.cardCount} cartão(ões) · Reservas {currency(bank.reserveCents)}</small><small>{bank.hasCash ? "Saldo para débito" : "Adicionar saldo da conta →"}</small></span><b data-negative={bank.cashCents < 0 || undefined}>{bank.hasCash ? currency(bank.cashCents) : "Não informado"}</b></Link>)}{!data.banks.length && <EmptyDashboard icon={Landmark} text={t("noCards")} href="/finance/accounts" linkText={t("configure")}/>} {data.accounts.some((account) => account.unassigned) && <Link href="/finance/transactions"><span className="finance-account-mark tone-warning"><AlertTriangle size={16}/></span><span><strong>{t("pendingLink")}</strong><small>{t("transactions")}</small></span><ArrowRight size={15}/></Link>}</div>
@@ -110,6 +109,7 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
             ? card.statement.nextDueDate ? `${card.statement.overdue ? `${t("overdueStatement")} · ` : ""}${t("statementDue")} ${date(card.statement.nextDueDate)}${card.statement.closingDate ? ` · ${t("statementCloses")} ${date(card.statement.closingDate)}` : card.statement.closingDay ? ` · ${t("closesDay")} ${card.statement.closingDay}` : ""}` : t("noOpenStatement")
             : [card.closingDay && `${t("closesDay")} ${card.closingDay}`, card.dueDay && `${t("dueDay")} ${card.dueDay}`].filter(Boolean).join(" · ")}</small></div><CreditLimitBreakdown breakdown={card.breakdown} compact/></Link>)}</div> : <EmptyDashboard icon={CreditCard} text={t("noCards")} href="/finance/accounts" linkText={t("addCard")}/>}
         </article></RevealOnScroll>
+        <RevealOnScroll className="finance-calendar-reveal" delay={.08}><FinanceSpendingCalendar compact initialMonth={calendar} today={data.today} accounts={captureAccounts} categories={calendarCategories} statements={data.calendarStatements} canWrite={calendarCanWrite} canManageCards={data.canExportReport}/></RevealOnScroll>
       </section>
 
       <section id="analises" className="finance-primary-grid">

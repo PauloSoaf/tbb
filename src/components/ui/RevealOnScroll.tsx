@@ -8,8 +8,8 @@ export function RevealOnScroll({ children, className, delay = 0 }: { children: R
   return <motion.div
     className={className}
     initial={reduceMotion ? false : { opacity: 0, y: 18 }}
-    whileInView={reduceMotion ? undefined : { opacity: 1, y: 0 }}
+    whileInView={{ opacity: 1, y: 0 }}
     viewport={{ once: true, amount: .12 }}
-    transition={{ duration: .42, delay, ease: [.22, 1, .36, 1] }}
+    transition={reduceMotion ? { duration: 0, delay: 0 } : { duration: .42, delay, ease: [.22, 1, .36, 1] }}
   >{children}</motion.div>;
 }

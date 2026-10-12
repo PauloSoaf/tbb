@@ -23,13 +23,14 @@ async function loadState(db: CardStatementDb, workspaceId: string) {
   const [accounts, statements, linked] = await Promise.all([
     db.account.findMany({ where: { workspaceId, type: "CREDIT_CARD", isArchived: false }, select: { id: true, name: true, institution: true }, orderBy: { createdAt: "asc" } }),
     db.cardStatement.findMany({ where: { workspaceId }, select: statementSelect }),
-    db.financeTransaction.findMany({ where: { workspaceId, type: "EXPENSE", cardStatementId: { not: null } }, select: { cardStatementId: true, statementDetailMode: true, amountCents: true } }),
+    db.financeTransaction.findMany({ where: { workspaceId, type: { in: ["EXPENSE", "REFUND"] }, cardStatementId: { not: null } }, select: { cardStatementId: true, statementDetailMode: true, amountCents: true, type: true } }),
   ]);
   const addedBy = new Map<string, number>();
   const detailedBy = new Map<string, number>();
   for (const item of linked) if (item.cardStatementId) {
-    detailedBy.set(item.cardStatementId, (detailedBy.get(item.cardStatementId) || 0) + item.amountCents);
-    if (item.statementDetailMode === "ADDED_TO_STATEMENT") addedBy.set(item.cardStatementId, (addedBy.get(item.cardStatementId) || 0) + item.amountCents);
+    const signed = (item.type === "REFUND" ? -1 : 1) * item.amountCents;
+    detailedBy.set(item.cardStatementId, (detailedBy.get(item.cardStatementId) || 0) + signed);
+    if (item.statementDetailMode === "ADDED_TO_STATEMENT") addedBy.set(item.cardStatementId, (addedBy.get(item.cardStatementId) || 0) + signed);
   }
   const existing: ExistingStatement[] = statements.map((row) => ({
     ...row, dueDate: dayOf(row.dueDate), closingDate: dayOf(row.closingDate), paidAt: dayOf(row.paidAt), sourceAsOf: dayOf(row.sourceAsOf)!, addedCents: addedBy.get(row.id) || 0, detailedCents: detailedBy.get(row.id) || 0,

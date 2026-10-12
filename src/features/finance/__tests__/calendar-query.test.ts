@@ -11,7 +11,7 @@ describe("calendar workspace reads",()=>{
   beforeEach(()=>{vi.clearAllMocks();mocks.db.financeTransaction.findMany.mockResolvedValue([entry]);mocks.context.mockResolvedValue({workspaceId:"own"});mocks.permission.mockResolvedValue({workspaceId:"own",role:"OWNER"});});
   it("reads a bounded UTC month from the ledger, excluding unconfirmed income",async()=>{
     expect((await financeCalendarMonth("own","2032-02",true)).entries).toEqual([expect.objectContaining({day:"2032-02-29",amountCents:2400,isCardPurchase:true,cardStatementId:"private-bill"})]);
-    expect(mocks.db.financeTransaction.findMany.mock.calls[0][0].where).toEqual({workspaceId:"own",date:{gte:new Date("2032-02-01"),lt:new Date("2032-03-01")},source:{not:"QUICK_INCOME"}});
+    expect(mocks.db.financeTransaction.findMany.mock.calls[0][0].where).toEqual({workspaceId:"own",isConsumption:true,date:{gte:new Date("2032-02-01"),lt:new Date("2032-03-01")},source:{not:"QUICK_INCOME"}});
   });
   it("omits private statement identifiers for other roles",async()=>{expect((await financeCalendarMonth("own","2032-02")).entries[0].cardStatementId).toBeNull();});
   it("rejects invalid months before querying",async()=>{await expect(financeCalendarMonth("own","2032-13")).rejects.toThrow();expect(mocks.db.financeTransaction.findMany).not.toHaveBeenCalled();});
