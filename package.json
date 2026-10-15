@@ -11,6 +11,8 @@
     "postinstall": "prisma generate",
     "test": "vitest run",
     "test:watch": "vitest",
+    "prisma:assemble": "node scripts/assemble-schema.mjs && prisma format",
+    "prisma:check": "node scripts/assemble-schema.mjs --check",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",

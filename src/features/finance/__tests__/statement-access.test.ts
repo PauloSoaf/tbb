@@ -6,6 +6,7 @@ const mocks=vi.hoisted(()=>{
     financeTransaction:{findMany:findMany(),groupBy:findMany(),findFirst:vi.fn().mockResolvedValue(null)},
     financeCategory:{findMany:findMany()},subscription:{findMany:findMany()},debt:{findMany:findMany()},savingsGoal:{findMany:findMany()},
     investmentPosition:{findMany:findMany()},investmentFixedIncomeProfile:{findMany:findMany()},$queryRaw:findMany(),
+    financialSnapshot:{groupBy:findMany()},activityEvent:{findMany:findMany()},
   }};
 });
 vi.mock("@/lib/prisma",()=>({prisma:mocks.db}));

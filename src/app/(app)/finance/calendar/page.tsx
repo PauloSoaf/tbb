@@ -1,3 +1,4 @@
+import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import { cookies } from "next/headers";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FinanceSpendingCalendar } from "@/features/finance/FinanceSpendingCalendar";
@@ -23,9 +24,9 @@ export default async function SpendingCalendarPage({ searchParams }: { searchPar
     cardStatementRows(context),
     financeCalendarCanWrite(),
   ]);
-  return <div className="stack">
+  return <FinancePrivacyBoundary><div className="stack">
     <PageHeader eyebrow={copy("eyebrow")} title={copy("pageTitle")} description={copy("pageHint")}/>
     <FinanceSpendingCalendar key={context.workspaceId} initialMonth={calendar} today={today} accounts={options.accounts} categories={options.categories} initialDay={day} canWrite={canWrite} canManageCards={context.role === "OWNER"}
       statements={rows.map(({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents, rolledIntoStatementId }) => ({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents: detailedCents ?? 0, rolledIntoStatementId }))}/>
-  </div>;
+  </div></FinancePrivacyBoundary>;
 }

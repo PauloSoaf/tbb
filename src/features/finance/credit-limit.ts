@@ -63,6 +63,15 @@ export type CardLedger = {
   unlinked: { date: string; type: "EXPENSE" | "REFUND"; amountCents: number }[];
 };
 
+/** The day up to which a card's registered bills cover its purchases: the last closing, or else the last due
+ * date. Purchases before it are taken to be inside a bill already; the ones from it on are not covered yet. */
+export function statementCoverage(statements: StatementRow[]): string | null {
+  const bills = statements.filter((row) => row.kind === "STATEMENT" && row.dueDate);
+  const closings = bills.map((row) => statementClosing(row, bills)).filter((value): value is NonNullable<typeof value> => Boolean(value));
+  const lastClosing = closings.map((value) => value.date).sort().at(-1);
+  return lastClosing ?? bills.map((row) => row.dueDate!).sort().at(-1) ?? null;
+}
+
 /** One rule for every screen. A card with registered bills is measured by them: open and known
  * future bills (already including detailed purchases) plus purchases after the last closing that
  * no bill covers yet. Paid bills free the limit; payments are reflected by the bill status, so a
@@ -76,10 +85,7 @@ export function cardLimitInput(input: {
     const future = Math.min(outstanding, Math.max(0, ledger.futureNetCents));
     return { limitCents: input.limitCents, openCents: outstanding - future, futureCents: future, unreconciledCents: 0, forecastCents: 0, pendingCents: 0, incomplete: false, referenceDate: today, source: "LEDGER" };
   }
-  const bills = statements.filter((row) => row.kind === "STATEMENT" && row.dueDate);
-  const closings = bills.map((row) => statementClosing(row, bills)).filter((value): value is NonNullable<typeof value> => Boolean(value));
-  const lastClosing = closings.map((value) => value.date).sort().at(-1);
-  const coverage = lastClosing ?? bills.map((row) => row.dueDate!).sort().at(-1) ?? null;
+  const coverage = statementCoverage(statements);
   const uncovered = coverage ? ledger.unlinked.filter((item) => item.date >= coverage) : [];
   const unreconciled = Math.max(0, uncovered.reduce((sum, item) => sum + (item.type === "EXPENSE" ? item.amountCents : -item.amountCents), 0));
   const pendingCents = statements.filter((row) => row.status === "FORECAST" && row.reconciliation === "PENDING").reduce((sum, row) => sum + row.amountCents, 0);

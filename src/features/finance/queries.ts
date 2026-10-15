@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { addDays, dateKeyToUTC, startOfMonth } from "@/lib/dates";
 import { isUnassignedAccount } from "@/features/finance/unassigned-account";
 import { summarizeCardStatements, type StatementRow } from "@/features/finance/card-statements";
+import { buildProvenance } from "@/features/finance/statement-provenance";
+import { outstandingOf } from "@/features/finance/statement-payment";
 import { calculateCreditCardLimitBreakdown, cardLimitInput, type CardLedger } from "@/features/finance/credit-limit";
 
 const dayOf = (value: Date | null) => (value ? value.toISOString().slice(0, 10) : null);
@@ -17,16 +19,19 @@ export const canReadCardStatements = (viewer: StatementViewer) => viewer.role ==
  * card expenses added on top of it; already-included expenses only count as detail. */
 export async function cardStatementRows(viewer: StatementViewer): Promise<StatementRow[]> {
   if (!canReadCardStatements(viewer)) return [];
-  const [rows, linked] = await Promise.all([
+  const [rows, linked, verifications] = await Promise.all([
     prisma.cardStatement.findMany({
       where: { workspaceId: viewer.workspaceId },
-      select: { id: true, updatedAt: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, closingDate: true, closingDay: true, referenceMonth: true, paidAt: true, sourceAsOf: true, reconciliation: true, overlapsStatementId: true, notes: true, rolledIntoStatementId: true, amountIsOutstanding: true, payments: { select: { amountCents: true, date: true } }, account: { select: { name: true } } },
+      select: { id: true, createdAt: true, updatedAt: true, source: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, closingDate: true, closingDay: true, referenceMonth: true, paidAt: true, sourceAsOf: true, reconciliation: true, overlapsStatementId: true, notes: true, rolledIntoStatementId: true, amountIsOutstanding: true, payments: { select: { amountCents: true, date: true } }, account: { select: { name: true } } },
     }),
     prisma.financeTransaction.findMany({
       where: { workspaceId: viewer.workspaceId, cardStatementId: { not: null }, type: { in: ["EXPENSE", "REFUND"] } },
       select: { cardStatementId: true, statementDetailMode: true, amountCents: true, type: true },
     }),
+    // One batched read: the last time the user confirmed each bill against its original document.
+    prisma.financialSnapshot.groupBy({ by: ["statementId"], where: { workspaceId: viewer.workspaceId, kind: "CARD_STATEMENT", statementId: { not: null } }, _max: { createdAt: true } }),
   ]);
+  const verifiedAt = new Map(verifications.map((item) => [item.statementId!, item._max.createdAt]));
   const detail = new Map<string, { addedCents: number; detailedCents: number; detailCount: number }>();
   for (const item of linked) {
     const current = detail.get(item.cardStatementId!) ?? { addedCents: 0, detailedCents: 0, detailCount: 0 };
@@ -36,13 +41,14 @@ export async function cardStatementRows(viewer: StatementViewer): Promise<Statem
     if (item.statementDetailMode === "ADDED_TO_STATEMENT") current.addedCents += signed;
     detail.set(item.cardStatementId!, current);
   }
-  return rows.map(({ account, updatedAt, payments, ...row }) => {
+  return rows.map(({ account, updatedAt, createdAt, source, payments, ...row }) => {
     const extra = detail.get(row.id) ?? { addedCents: 0, detailedCents: 0, detailCount: 0 };
-    const paidCents = (payments || []).reduce((sum, item) => sum + item.amountCents, 0);
-    const deductiblePaid = row.amountIsOutstanding ? (payments || []).filter(p => p.date && row.sourceAsOf && p.date > row.sourceAsOf).reduce((sum, p) => sum + p.amountCents, 0) : paidCents;
+    // The same rule the payment dialog and the server use, so the number on screen is the number validated.
+    const { paidCents, effectiveCents } = outstandingOf({ status: row.status, declaredCents: row.amountCents, addedCents: extra.addedCents, amountIsOutstanding: row.amountIsOutstanding, sourceAsOf: dayOf(row.sourceAsOf), payments: (payments || []).map((item) => ({ amountCents: item.amountCents, date: dayOf(item.date) })) });
     return {
-      ...row, ...extra, version: updatedAt?.toISOString() || "", accountName: account.name, dueDate: dayOf(row.dueDate), closingDate: dayOf(row.closingDate), paidAt: dayOf(row.paidAt),
-      amountCents: row.status === "PAID" ? row.amountCents + extra.addedCents : Math.max(0, row.amountCents + extra.addedCents - deductiblePaid), declaredCents: row.amountCents, paidCents,
+      ...row, ...extra, version: updatedAt?.toISOString() || "", provenance: buildProvenance({ createdAt, updatedAt, sourceAsOf: row.sourceAsOf, source }, verifiedAt.get(row.id)), accountName: account.name, dueDate: dayOf(row.dueDate), closingDate: dayOf(row.closingDate), paidAt: dayOf(row.paidAt),
+      amountCents: effectiveCents, declaredCents: row.amountCents, paidCents,
+      payments: (payments || []).map((item) => ({ amountCents: item.amountCents, date: dayOf(item.date) })),
     };
   });
 }

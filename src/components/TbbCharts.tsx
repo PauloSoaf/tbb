@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AreaChart } from "@/components/charts/area-chart";
 import { Area } from "@/components/charts/area";
 import { BarChart } from "@/components/charts/bar-chart";
@@ -11,6 +11,7 @@ import { ChartTooltip } from "@/components/charts/tooltip/chart-tooltip";
 import { FunnelChart } from "@/components/charts/funnel-chart";
 import { Grid } from "@/components/charts/grid";
 import { XAxis } from "@/components/charts/x-axis";
+import { fitLabels } from "@/features/finance/chart-labels";
 import {
   HeatmapCells,
   HeatmapChart,
@@ -298,4 +299,33 @@ export function CardStatementTimelineChart({ data }: { data: CardStatementMonthP
       ...(asNumber(point.pending) ? [{ label: "A conciliar (fora do total)", value: formatCurrency(point.pending), color: "var(--muted-foreground)" }] : []),
     ]}/>
   </BarChart>;
+}
+
+export type LoanCostPoint = { name: string; principal: number; interest: number; charges: number };
+/** What each option costs, split into the amount itself, interest and other charges (IOF, fees, insurance). */
+export function LoanCostChart({ data }: { data: LoanCostPoint[] }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const node = box.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    watch.observe(node);
+    return () => watch.disconnect();
+  }, []);
+  // Roughly 7.5px per label character: names are cut to what fits under one bar, and stay distinct.
+  const room = width ? Math.floor(width / Math.max(1, data.length) / 7.5) : 14;
+  const shown = useMemo(() => { const labels = fitLabels(data.map((point) => point.name), room); return data.map((point, index) => ({ ...point, name: labels[index] })); }, [data, room]);
+  return <div ref={box}><BarChart data={shown} xDataKey="name" stacked aspectRatio="2.2 / 1" margin={{ left: 24, right: 18, top: 22, bottom: 40 }} barGap={0.3}>
+    <Grid horizontal hideHorizontalEdgeLines/>
+    <Bar dataKey="principal" fill="var(--chart-5)" lineCap={4}/>
+    <Bar dataKey="interest" fill="var(--credit-future)" lineCap={4}/>
+    <Bar dataKey="charges" fill="var(--credit-open)" lineCap={4}/>
+    <BarXAxis showAllLabels/>
+    <ChartTooltip showDatePill={false} rows={(point) => [
+      { label: "Valor resolvido", value: formatCurrency(point.principal), color: "var(--chart-5)" },
+      { label: "Juros", value: formatCurrency(point.interest), color: "var(--credit-future)" },
+      { label: "IOF, tarifas e seguro", value: formatCurrency(point.charges), color: "var(--credit-open)" },
+    ]}/>
+  </BarChart></div>;
 }

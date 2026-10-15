@@ -1,3 +1,4 @@
+import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { PageHeader, EmptyState } from "@/components/ui/PageHeader";
@@ -9,6 +10,8 @@ import { BankBadge } from "@/features/finance/BankBadge";
 import { CreditLimitBreakdown } from "@/features/finance/CreditLimitBreakdown";
 import { cardCycleSuggestion } from "@/features/finance/card-statements";
 import { cardStatementRows, creditCardPositions, financeSummary } from "@/features/finance/queries";
+import { StatementProvenanceTooltip } from "@/features/finance/StatementProvenanceTooltip";
+import { describeProvenance } from "@/features/finance/statement-provenance";
 import { money } from "@/features/finance/money";
 import { dayKey, formatDay } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
@@ -28,7 +31,7 @@ export default async function AccountsPage() {
   const cards = new Map((await creditCardPositions(c.workspaceId, today, statementRows)).map((card) => [card.id, card]));
   const day = (value: string) => formatDay(value, c.workspace.locale, { day: "2-digit", month: "2-digit", year: "numeric" });
 
-  return <div className="stack">
+  return <FinancePrivacyBoundary><div className="stack">
     <PageHeader eyebrow="MONEY · ACCOUNTS" title="Onde seu dinheiro vive." description="Conta, cofrinhos e cartão juntos por banco. Saldo é seu dinheiro; limite é crédito disponível."><Modal title="Criar conta" trigger={<><Plus size={15}/>Nova conta</>}><AccountForm/></Modal></PageHeader>
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{groupBankAccounts(s.accounts).map((bank) => <article className="panel stack bank-account-panel" key={bank.id} id={`banco-${bank.id}`}>
       <div className="account-card-title"><BankBadge institution={bank.institution} name={bank.name}/><div><h2>{bank.name}</h2><p className="muted">Seu dinheiro e seus cartões</p></div></div>
@@ -52,7 +55,7 @@ export default async function AccountsPage() {
           <div className="row justify-between"><span className="badge">CARTÃO DE CRÉDITO</span><span className="muted text-xs">{cycle}</span></div>
           <h3>{a.name}</h3>
           <div className="account-card-invoice">
-            <div><small>{statement?.overdue ? "Fatura vencida" : "Fatura atual"}</small><strong>{money(card.breakdown.openCents)}</strong></div>
+            <div><small>{statement?.overdue ? "Fatura vencida" : "Fatura atual"}{open && <StatementProvenanceTooltip subject={`${a.name} com vencimento ${day(open.dueDate!)}`} view={describeProvenance(open.provenance, { timeZone: c.workspace.timezone, today, now: new Date(), status: open.status })}/>}</small><strong>{money(card.breakdown.openCents)}</strong></div>
             <div><small>Futuras</small><strong>{money(card.breakdown.futureCents)}</strong></div>
             <div><small>Limite</small><strong>{card.breakdown.limitCents ? money(card.breakdown.limitCents) : "Não informado"}</strong></div>
           </div>
@@ -64,5 +67,5 @@ export default async function AccountsPage() {
       return <section className="stack bank-product" key={a.id} id={`conta-${a.id}`}><div className="row justify-between"><h3>{a.name}</h3><strong>{money(a.balanceCents)}</strong></div><small className="muted">{a.type === "SAVINGS" ? "Cofrinho / poupança · reserva separada" : a.type === "CHECKING" ? "Conta corrente · saldo para débito" : a.type === "DIGITAL_WALLET" ? "Carteira digital" : a.type === "INVESTMENT" ? "Investimento" : a.type === "CASH" ? "Dinheiro" : "Outra conta"}</small>{actions}</section>;
     })}</article>)}{s.accounts.filter(isUnassignedAccount).map((a) => <article className="panel stack" key={a.id}><h2>{a.name}</h2><p className="muted">Transações aguardando vínculo</p><Link href="/finance/transactions">Vincular lançamentos →</Link></article>)}{!s.accounts.length && <div className="panel"><EmptyState title="Crie sua primeira conta" description="Ela será a origem dos seus lançamentos e importações."/></div>}</div>
     <section className="panel stack"><div className="row justify-between"><div><h2>Categorias</h2><p className="muted">Personalize classificação e regras.</p></div><div className="row"><Modal title="Criar categoria" trigger="Nova categoria"><CategoryForm categories={categories}/></Modal>{!categories.length && <ActionForm action={createDefaultCategories}><button className="button-secondary">Adicionar categorias iniciais</button></ActionForm>}</div></div><div className="row">{categories.map((category) => <span className="badge" key={category.id} style={{ borderColor: category.color }}>{category.name} · {category.type}</span>)}</div></section>
-  </div>;
+  </div></FinancePrivacyBoundary>;
 }

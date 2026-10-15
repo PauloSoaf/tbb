@@ -1,3 +1,4 @@
+import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import { InvestmentOverview } from "@/features/investments/InvestmentOverview";
 import { PartnerInvestmentSummary } from "@/features/investments/PartnerInvestmentSummary";
 import { investmentOverview, investmentShellData } from "@/features/investments/queries";
@@ -13,17 +14,17 @@ export default async function InvestmentsPage({ searchParams }: { searchParams: 
   const today = dayKey(new Date(), context.workspace.timezone);
   if (scope !== "me") {
     const partnerAccess = await getPartnerContext("investments");
-    if (!partnerAccess) return <div className="stack"><PageHeader eyebrow="MONEY · INVESTMENTS" title={scope === "partner" ? "Parceiro" : "Juntos"}/><EmptyState title="Nada compartilhado aqui ainda" description="Conecte um parceiro em Configurações → Partner ou peça para ele compartilhar Investments."/></div>;
+    if (!partnerAccess) return <FinancePrivacyBoundary><div className="stack"><PageHeader eyebrow="MONEY · INVESTMENTS" title={scope === "partner" ? "Parceiro" : "Juntos"}/><EmptyState title="Nada compartilhado aqui ainda" description="Conecte um parceiro em Configurações → Partner ou peça para ele compartilhar Investments."/></div></FinancePrivacyBoundary>;
     const [partner, partnerWorkspace, me] = await Promise.all([
       investmentOverview(partnerAccess.partnerWorkspaceId, today),
       prisma.workspace.findUnique({ where: { id: partnerAccess.partnerWorkspaceId }, select: { name: true } }),
       scope === "together" ? investmentOverview(context.workspaceId, today) : Promise.resolve(undefined),
     ]);
-    return <PartnerInvestmentSummary scope={scope} me={me} partner={partner} partnerName={partnerWorkspace?.name || "Parceiro"}/>;
+    return <FinancePrivacyBoundary><PartnerInvestmentSummary scope={scope} me={me} partner={partner} partnerName={partnerWorkspace?.name || "Parceiro"}/></FinancePrivacyBoundary>;
   }
   const [data, shell] = await Promise.all([
     investmentOverview(context.workspaceId, today),
     investmentShellData(context.workspaceId),
   ]);
-  return <InvestmentOverview data={data} shell={shell}/>;
+  return <FinancePrivacyBoundary><InvestmentOverview data={data} shell={shell}/></FinancePrivacyBoundary>;
 }

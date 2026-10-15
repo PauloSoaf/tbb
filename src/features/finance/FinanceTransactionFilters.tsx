@@ -39,7 +39,7 @@ export function FinanceTransactionFilters({accounts,categories,current}:{account
   return <form className="filter-bar finance-transaction-filters" action="/finance/transactions">
     <label className="finance-filter-search">
       <span className="finance-filter-caption">Pesquisar transações</span>
-      <span className="finance-filter-search-field"><Search size={16}/><input name="q" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar descrição, estabelecimento ou tag" autoComplete="off"/>{query&&<button type="button" onClick={()=>setQuery("")} aria-label="Limpar pesquisa"><X size={14}/></button>}</span>
+      <span className="finance-filter-search-field"><Search size={16}/><input name="q" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Buscar descrição, observação, estabelecimento ou tag" autoComplete="off"/>{query&&<button type="button" onClick={()=>setQuery("")} aria-label="Limpar pesquisa"><X size={14}/></button>}</span>
     </label>
     <FilterSelect caption="Conta" name="account" value={account} options={accountOptions} onChange={setAccount}/>
     <FilterSelect caption="Categoria" name="category" value={category} options={categoryOptions} onChange={setCategory}/>

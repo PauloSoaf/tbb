@@ -75,6 +75,32 @@ O PDF tem texto selecionável, paginação e gráfico de cobertura. O Markdown p
 
 Breadcrumb e Voltar seguem a política de [navegação](NAVIGATION.md). O menu retraído mostra ícones e tooltips, com expansão explícita. As traduções iniciais são serializadas pelo servidor para que a primeira renderização do cliente use o mesmo conteúdo. A supressão de avisos por atributos externos no `body` fica limitada a esse elemento; divergências dentro da aplicação continuam visíveis.
 
+## Para onde vai o salário
+
+A visão geral mostra dois gráficos de rosca da renda prevista, mês a mês (o atual e os cinco seguintes, com setas para navegar). O primeiro, **Fixos, faturas e variáveis**, junta tudo o que sai da renda: gastos fixos, assinaturas e recorrentes já lançados, as faturas de cartão do mês e os variáveis. O segundo, **Só gastos fixos**, mostra apenas os fixos. Os dois usam os mesmos itens (`fixedExpenseItems`), então nunca discordam, e trabalham em centavos inteiros, com percentagens em basis points que somam exatamente 10.000 (método do maior resto). Compromissos pequenos são agrupados em "Outros". Quando os compromissos superam a renda, o excesso aparece como alerta, nunca como fatia negativa. A alternância Por item / Por tipo vale para os dois gráficos, e Registrar gastos fixos abre o cadastro.
+
+**Faturas do mês** (`billsForMonth`, visíveis só para o titular): contam o que ainda falta pagar das faturas abertas ou futuras conhecidas que vencem no mês, mais as abertas já vencidas no mês atual, e o que já foi pago no mês (pagamentos pela própria data; um sem data vai para o mês do vencimento). Uma fatura cujo saldo passou para a seguinte não deve nada, então o saldo é contado uma vez só, no mês da fatura que o carrega. Previsões mensais não são faturas.
+
+**Sem contar duas vezes.** As faturas mantêm seus valores integrais. Um gasto fixo só sai da fatia separada de fixos quando um lançamento vinculado a uma das faturas daquele mês comprova a cobertura, no mesmo cartão e com identidade de assinatura ou nome correspondente. Cada centavo do lançamento é usado uma vez, limitado ao valor do fixo e da fatura; o restante planejado continua adicional. Marcar Cobrado no cartão, por si só, não comprova que um gasto já entrou numa fatura. O segundo gráfico mantém todos os gastos fixos, inclusive os cobertos. A lista expansível de fixos cobertos explica a composição. Os variáveis deixam de fora as compras de cartão que uma fatura registrada já contém (vinculadas a ela, ou anteriores ao que as faturas cobrem, a mesma regra do limite do cartão); compras em cartão sem faturas ou depois do último fechamento continuam em Variáveis.
+
+**Conferência dos totais.** Faturas abertas (todos os vencimentos) mostra o saldo ainda a pagar; Faturas no gráfico mostra somente os vencimentos e pagamentos do mês selecionado, separados em A pagar e Já pago no mês. Pagamentos feitos no mês continuam como saída de renda. Saldo transportado aparece apenas na fatura que o carrega. Faturas futuras sem data de vencimento confirmada são indicadas como fora da divisão mensal. Os percentuais das fatias usam a base do gráfico, que é o total de compromissos quando supera a renda; o indicador central compara compromissos com renda.
+
+**Outros e agrupamento por tipo.** Clicar em Outros abre os nomes, valores e tipos de todos os itens agrupados, nos dois gráficos. Por tipo também permite conferir seus itens. O agrupamento preserva a classificação de assinaturas e recorrentes, inclusive quando estavam em Outros.
+
+**Modo privado.** O botão de olho na barra superior de Finanças desfoca números e gráficos, inclusive formulários e tooltips. Hover ou foco revela temporariamente o elemento. A preferência é guardada em cookie e considerada no HTML inicial, protegendo os valores antes da hidratação. Ver [modo privado](FINANCE_PRIVACY.md).
+
+**Alertas.** Quando fixos e faturas juntos, mesmo sem variáveis, passam da renda, o gráfico avisa com os valores. Para ver o resto do mês, é possível tirar uma fatura do gráfico (ela volta com "mostrar de novo"); os gastos fixos ligados ao cartão continuam, porque são compromissos separados. A escolha vale só para o mês e a sessão atuais. Meses seguintes não têm variáveis lançadas ainda, e valem os fixos do plano, as assinaturas ativas, os recorrentes do mês atual e as faturas já conhecidas. A sobra prevista não é saldo bancário, e investimentos não entram. Pagamentos mínimos de dívidas que não estão cadastrados como fixos aparecem só numa nota.
+
+**Gastos fixos com fim.** O cadastro aceita "Termina em" (opcional): o gasto conta até o mês dessa data, inclusive, e depois some dos gráficos, de "Fixos" e de "Uso da renda". Gastos encerrados continuam listados, marcados como encerrados, e aparecem no PDF/Markdown com a data de término e o cartão.
+
+## Grade de lançamentos
+
+Linhas novas entram no topo da Planilha, da Lista e do CSV/Excel, e o foco vai para o primeiro campo. `orderGridRows` mantém os rascunhos antes dos lançamentos salvos, os mais novos primeiro, e ordena os salvos pela coluna escolhida (valores por número). Depois de salvar ou atualizar, `mergeServerRows` junta os dados do servidor sem perder edições ainda não salvas, e rascunhos têm o selo "Não salvo". Cada lançamento tem uma observação opcional (até 2.000 caracteres), visível na grade, na lista, na gaveta de detalhes e no calendário, e pesquisável pelo filtro. Os valores só entram nos totais depois de "Salvar".
+
+## Simulador de crédito
+
+A página Dívidas tem o atalho Simular empréstimo ou parcelamento (somente titular), que abre `/finance/debts/simulator`. Compara pagar à vista, parcelar a fatura e empréstimos lado a lado, por custo e por impacto no mês, sem criar dívida nem alterar faturas. Regras e testes em [LOAN_SIMULATOR.md](LOAN_SIMULATOR.md).
+
 ## Modelo e atualização
 
 As regras de dados estão em [DATA_MODEL.md](DATA_MODEL.md), e a importação em [FINANCE_IMPORT_ENGINE.md](FINANCE_IMPORT_ENGINE.md).
@@ -100,3 +126,21 @@ A faixa de dias manteve o conteúdo abaixo de 130 px de altura. A revisão das i
 Typecheck, build de produção e lint dos arquivos alterados passaram. Os 45 testes do calendário passaram; a suíte completa passou em 364 de 365 testes, com a mesma falha de caminhos POSIX no Windows já registrada.
 
 Foram aprovadas 70 verificações distintas no Chrome contra o build de produção. A conferência cobriu as três colunas no desktop, Contas mais estreito, a grade mensal reduzida e os detalhes diários nos temas claro e escuro em 320, 375, 768 e 1440 px. Também verificou valores exatos nos tooltips, várias faturas no mesmo vencimento, faturas futuras conhecidas, ausência de faturas pagas como compromissos, teclado, toque, PT/EN/ES e privacidade para MEMBER/VIEWER. Uma compra adicionada ao total da fatura foi salva no banco sintético e atualizou o valor a pagar sem misturá-lo ao total de gastos registrados. Não houve erros de runtime ou hidratação. Os dados reais foram preservados e a validação com gravação ficou restrita ao banco descartável.
+
+## Validação das seis melhorias de 12/10/2026
+
+Typecheck e build de produção passaram, com a rota `/finance/debts/simulator` no resultado. A suíte completa passou em 673 de 674 testes executados; a falha restante é a comparação de caminhos POSIX no teste de storage no Windows, já registrada acima. Os 10 testes de integração com PostgreSQL passaram contra um banco descartável com as 13 migrations. O lint geral mantém os quatro erros e o aviso antigos, todos fora desta entrega. Testes novos foram conferidos por mutação: cada regra alterada de propósito (ordem de rascunhos, vínculo de saldo transportado, trava de versão, arredondamento, entrada no mês de início, campos ocultos) derrubou ao menos um teste.
+
+A conferência no navegador (Edge, baseado em Chromium) usou sessão e dados sintéticos num banco descartável, removido depois, nos temas claro e escuro, em desktop e em 390 px, sem overflow horizontal nem erros de console nas telas novas. Cobriu: linhas novas no topo da grade em Planilha, Lista e CSV/Excel; observação na grade, na lista e na gaveta de detalhes; tooltip de procedência nas faturas e nos cartões; baixa parcial, quitação, transporte de saldo e desfazer, com o resultado conferido no banco; a rosca do salário; e o simulador com salvar, reabrir e a comparação por custo e por folga no orçamento. A verificação achou e corrigiu duas chaves React duplicadas entre os diálogos de pagamento e correção da mesma fatura e uma barra de tabela cortada no simulador.
+
+Os dados reais foram conferidos somente por leitura (contagens e constraints), sem alterar nada. Um aviso antigo permanece fora do escopo: o gráfico de uso da renda na visão geral registra, durante a animação de entrada, larguras negativas de `<rect>` no console, sem efeito visível.
+
+## Validação consolidada de 14/10/2026
+
+Typecheck, lint completo, build de produção e conferência dos fragmentos Prisma passaram. A suíte padrão passou em 734 testes; os 10 testes de integração, condicionais nessa suíte, passaram separadamente em PostgreSQL descartável com as 14 migrations. A comparação de caminhos do storage foi corrigida para funcionar também no Windows.
+
+Foram aprovadas 96 verificações no Chrome: 60 em desenvolvimento e 36 em produção, incluindo telas de 320, 390, 768 e 1440 px. A conferência cobriu o detalhamento de Outros nos dois gráficos, faturas integrais por vencimento e pagamentos, simulação de exclusão de fatura, preferência de privacidade, hover, foco, formulários e navegação pelas páginas financeiras. Os seis indicadores com números animados foram conferidos visualmente em desktop e celular. Recarregamentos com o modo privado ativo e CPU reduzida mantiveram os gráficos completos, sem erros de runtime ou hidratação.
+
+O modo privado protege os elementos nativos que envolvem valores animados e aguarda a hidratação das páginas antes de adicionar atributos. Diálogos fechados ficam fora da varredura e recebem a proteção quando abertos. Isso evita interferir na hidratação adiada de formulários. As regras estão em [FINANCE_PRIVACY.md](FINANCE_PRIVACY.md).
+
+A conferência no navegador usou uma cópia isolada do banco local; a integração usou dados sintéticos. Os bancos descartáveis foram removidos ao final. A comparação de contagens e hashes confirmou a preservação dos dados financeiros e do usuário no banco original. Backups, credenciais temporárias, imagens e relatórios de QA permanecem somente em arquivos locais ignorados pelo Git.

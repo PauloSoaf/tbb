@@ -21,12 +21,12 @@ describe("asset page permission boundaries", () => {
       if (permission === "WRITE") throw new AuthorizationError();
       return { workspaceId: "own", workspace: { timezone: "UTC" } };
     });
-    expect((await AssetsPage()).props.canWrite).toBe(false);
+    expect((await AssetsPage()).props.children.props.canWrite).toBe(false);
     expect(mocks.rows).toHaveBeenCalledWith("own", true);
     expect(mocks.debts.mock.calls[0][0].where).toEqual({ workspaceId: "own" });
   });
   it("shows write controls only after effective WRITE authorization", async () => {
-    expect((await AssetsPage()).props.canWrite).toBe(true);
+    expect((await AssetsPage()).props.children.props.canWrite).toBe(true);
     expect(mocks.permission.mock.calls.map(([permission]) => permission)).toEqual(["READ", "WRITE"]);
   });
   it("does not hide unrelated permission infrastructure failures", async () => {

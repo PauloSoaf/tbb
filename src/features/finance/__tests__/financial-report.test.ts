@@ -18,6 +18,16 @@ describe('financial report exports',()=>{
     expect(report.markdown).toContain('Receitas efetivamente registradas no mês | R$');expect(report.markdown).toContain('Renda mensal prevista (não recebimento)');expect(report.markdown).toContain('Cofrinhos e poupança');expect(report.markdown).toContain('não antecipa salário');
     for(const section of ['Todos os cartões','Todas as faturas','Histórico completo','Gastos fixos','Dívidas efetivas','Investimentos'])expect(report.markdown).toContain(section);
   });
+  it('exports when each planned expense ends and which card it is charged to',()=>{
+    const report=buildFinancialReport({...data,creditCards:[{id:'card',name:'Cartão sintético',limitCents:0,closingDay:null,dueDay:null,breakdown:{hasLimit:false,openCents:0,futureCents:0,availableCents:null,excessCents:0}}],plannedFixed:[
+      {id:'a',name:'Resort sintético',amountCents:55000,dueDay:2,notes:null,endsOn:'2032-12-02',cardAccountId:'card'},
+      {id:'b',name:'Aluguel sintético',amountCents:90000,dueDay:5,notes:null,endsOn:null,cardAccountId:null},
+      {id:'c',name:'Curso sintético',amountCents:10000,dueDay:null,notes:null,endsOn:null,cardAccountId:'archived'},
+    ]} as unknown as FinanceOverviewData,rows);
+    expect(report.markdown).toContain('Termina em | Cobrado no cartão');
+    expect(report.markdown).toContain('Resort sintético | R$');expect(report.markdown).toContain('2032-12-02 | Cartão sintético');
+    expect(report.markdown).toContain('Sem data de término | Não');expect(report.markdown).toContain('Sem data de término | Cartão arquivado');
+  });
   it('exports future and legacy planning rows explicitly and escapes table delimiters',()=>{
     const transaction={date:'2032-02-01',description:'Sintético | teste\nlinha',type:'INCOME',amountCents:20000,account:'Cash',destination:null,category:null,source:'QUICK_INCOME',statementDetailMode:null,installmentNumber:null,installmentTotal:null,recurring:true,merchant:null,notes:null};
     const report=buildFinancialReport(data,{...rows,transactions:[transaction,{...transaction,source:'MANUAL'}]});

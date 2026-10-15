@@ -4,9 +4,11 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/workspace";
-import { isDateKey } from "@/lib/dates";
+import { dayKey, isDateKey } from "@/lib/dates";
 import { dateOnly, parseMoney } from "./money";
 import { periodKeyFor } from "./card-statements";
+import { applyStatementPayment, undoStatementPayment } from "./statement-payment-service";
+import type { PaymentMode } from "./statement-payment";
 
 /** Corrections preserve statement identity and linked purchases; no ledger entry is created. */
 export async function correctCardStatement(fd: FormData) {
@@ -58,4 +60,42 @@ export async function correctCardStatement(fd: FormData) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) return { error: error.code === "P2002" ? "Já existe uma fatura neste vencimento ou competência." : "Não foi possível salvar. Atualize a página e tente novamente." };
     return { error: error instanceof Error ? error.message : "Não foi possível corrigir a fatura." };
   }
+}
+
+const PAYMENT_MODES: readonly PaymentMode[] = ["FULL", "PARTIAL", "CARRY", "CLOSE_CARRIED"];
+const revalidateFinance = () => { revalidatePath("/finance", "layout"); revalidatePath("/today"); revalidatePath("/insights"); };
+
+/** "Marcar como paga": settles, partly pays or carries over a bill. Owner only, in the session's workspace,
+ * in one serializable transaction. It never creates an expense or moves a bank balance. */
+export async function registerStatementPayment(fd: FormData) {
+  const ctx = await requirePermission("WRITE");
+  if (ctx.role !== "OWNER") return { error: "Somente o titular pode registrar pagamentos de fatura." };
+  const text = (key: string) => String(fd.get(key) || "").trim();
+  try {
+    const mode = PAYMENT_MODES.find((item) => item === text("mode"));
+    if (!mode) throw new Error("Escolha o que aconteceu com a fatura.");
+    const outcome = await prisma.$transaction((tx) => applyStatementPayment(tx, ctx, {
+      statementId: text("id"), version: text("version"), mode, amountCents: text("amount") ? parseMoney(text("amount")) : null,
+      paidOn: text("paidOn") || null, unknownDate: fd.get("unknownDate") === "on", nextStatementId: text("nextStatementId") || null,
+      carryIncluded: fd.get("carryIncluded") === "on", confirmed: fd.get("confirm") === "on", token: text("token"), today: dayKey(new Date(), ctx.workspace.timezone),
+    }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    revalidateFinance();
+    return { success: outcome.message, already: outcome.already };
+  } catch (error) {
+    // The unique fingerprint is the last line of defense against two simultaneous submissions of one token.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return { success: "Este pagamento já estava registrado.", already: true };
+    return { error: error instanceof Error ? error.message : "Não foi possível registrar o pagamento." };
+  }
+}
+
+/** Undoes the latest manual payment of a bill, only while nothing else changed it since. Audited. */
+export async function undoManualStatementPayment(fd: FormData) {
+  const ctx = await requirePermission("WRITE");
+  if (ctx.role !== "OWNER") return { error: "Somente o titular pode desfazer pagamentos de fatura." };
+  const text = (key: string) => String(fd.get(key) || "").trim();
+  try {
+    const result = await prisma.$transaction((tx) => undoStatementPayment(tx, ctx, { statementId: text("id"), version: text("version"), confirmed: fd.get("confirm") === "on" }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    revalidateFinance();
+    return { success: result.message };
+  } catch (error) { return { error: error instanceof Error ? error.message : "Não foi possível desfazer o pagamento." }; }
 }

@@ -1,3 +1,4 @@
+import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import { FinanceOverview } from "@/features/finance/FinanceOverview";
 import { PartnerFinanceSummary, type FinanceScopeMetrics } from "@/features/finance/PartnerFinanceSummary";
 import { financeOverview } from "@/features/finance/overview-query";
@@ -20,10 +21,10 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
   if (scope !== "me") {
     const partnerAccess = await getPartnerContext("finance");
     if (!partnerAccess) {
-      return <div className="stack">
+      return <FinancePrivacyBoundary><div className="stack">
         <PageHeader eyebrow="FINANCE" title={scope === "partner" ? "Parceiro" : "Juntos"}/>
         <EmptyState title="Nada para ver aqui ainda" description="Conecte-se a um parceiro em Configurações → Partner, ou peça para ele compartilhar o módulo Finance."/>
-      </div>;
+      </div></FinancePrivacyBoundary>;
     }
     const [partnerOverview, partnerWorkspace] = await Promise.all([
       financeOverview(partnerAccess.partnerWorkspaceId, today),
@@ -32,16 +33,16 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
     const partnerMetrics = toScopeMetrics(partnerOverview);
     const partnerName = partnerWorkspace?.name || "Parceiro";
     if (scope === "partner") {
-      return <div className="stack">
+      return <FinancePrivacyBoundary><div className="stack">
         <PageHeader eyebrow="FINANCE" title="Parceiro" description="Visão somente leitura dos dados que seu parceiro compartilhou."/>
         <PartnerFinanceSummary scope="partner" me={partnerMetrics} partner={partnerMetrics} partnerName={partnerName}/>
-      </div>;
+      </div></FinancePrivacyBoundary>;
     }
     const meOverview = await financeOverview(context.workspaceId, today);
-    return <div className="stack">
+    return <FinancePrivacyBoundary><div className="stack">
       <PageHeader eyebrow="FINANCE" title="Juntos" description="Renda, despesas e saldo somados. Cada workspace continua com seus próprios registros."/>
       <PartnerFinanceSummary scope="together" me={toScopeMetrics(meOverview)} partner={partnerMetrics} partnerName={partnerName}/>
-    </div>;
+    </div></FinancePrivacyBoundary>;
   }
 
   await requirePermission("READ");
@@ -52,5 +53,5 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
     financeCalendarCanWrite(),
   ]);
   const captureAccounts = overview.accounts.filter((account) => !account.unassigned).map(({ id, name, institution, type }) => ({ id, name, institution, type }));
-  return <FinanceOverview key={context.workspaceId} data={overview} captureAccounts={captureAccounts} calendar={calendar} calendarCategories={calendarOptions.categories} calendarCanWrite={canWrite}/>;
+  return <FinancePrivacyBoundary><FinanceOverview key={context.workspaceId} data={overview} captureAccounts={captureAccounts} calendar={calendar} calendarCategories={calendarOptions.categories} calendarCanWrite={canWrite}/></FinancePrivacyBoundary>;
 }

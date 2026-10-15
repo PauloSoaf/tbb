@@ -1,3 +1,4 @@
+import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import { notFound } from "next/navigation";
 import { InvestmentSectionPage } from "@/features/investments/InvestmentSectionPage";
 import { PartnerInvestmentSummary } from "@/features/investments/PartnerInvestmentSummary";
@@ -21,13 +22,13 @@ export default async function InvestmentSectionRoute({ params, searchParams }: {
   const scope = query.scope === "partner" || query.scope === "together" ? query.scope : "me";
   if (scope !== "me") {
     const partnerAccess = await getPartnerContext("investments");
-    if (!partnerAccess) return <div className="stack"><PageHeader eyebrow="MONEY · INVESTMENTS" title={scope === "partner" ? "Parceiro" : "Juntos"}/><EmptyState title="Nada compartilhado aqui ainda" description="O parceiro ainda não compartilhou Investments."/></div>;
+    if (!partnerAccess) return <FinancePrivacyBoundary><div className="stack"><PageHeader eyebrow="MONEY · INVESTMENTS" title={scope === "partner" ? "Parceiro" : "Juntos"}/><EmptyState title="Nada compartilhado aqui ainda" description="O parceiro ainda não compartilhou Investments."/></div></FinancePrivacyBoundary>;
     const [partner, partnerWorkspace, me] = await Promise.all([investmentOverview(partnerAccess.partnerWorkspaceId, today), prisma.workspace.findUnique({ where: { id: partnerAccess.partnerWorkspaceId }, select: { name: true } }), scope === "together" ? investmentOverview(context.workspaceId, today) : Promise.resolve(undefined)]);
-    return <PartnerInvestmentSummary scope={scope} me={me} partner={partner} partnerName={partnerWorkspace?.name || "Parceiro"}/>;
+    return <FinancePrivacyBoundary><PartnerInvestmentSummary scope={scope} me={me} partner={partner} partnerName={partnerWorkspace?.name || "Parceiro"}/></FinancePrivacyBoundary>;
   }
   const [data, shell] = await Promise.all([
     investmentOverview(context.workspaceId, today),
     investmentShellData(context.workspaceId),
   ]);
-  return <InvestmentSectionPage section={section} data={data} shell={shell}/>;
+  return <FinancePrivacyBoundary><InvestmentSectionPage section={section} data={data} shell={shell}/></FinancePrivacyBoundary>;
 }

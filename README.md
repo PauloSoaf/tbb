@@ -24,6 +24,16 @@ npm run dev
 
 O setup cria um `.env` exclusivo do TBB. O PostgreSQL local usa a porta `5440` e volume próprio. Acesse `http://localhost:3000` e crie sua conta em `/register`.
 
+Ao atualizar código que altera o schema Prisma, pare o servidor de desenvolvimento e sincronize o banco e o client antes de iniciar novamente:
+
+```bash
+npm run prisma:deploy
+npm run prisma:generate
+npm run dev
+```
+
+Uma mensagem como `The column ... does not exist in the current database` indica uma migration pendente. `prisma:deploy` aplica as migrations existentes; `npx prisma migrate status` confirma a sincronização. No Windows, parar o servidor antes de gerar o client também libera o arquivo da engine do Prisma.
+
 ## Verificação
 
 ```bash
@@ -48,5 +58,7 @@ O Finance também interpreta texto livre e mensagens copiadas do WhatsApp. Confi
 ## Documentação
 
 Consulte [`docs/tbb`](docs/tbb) para arquitetura, modelo de dados, módulos, design, migração de domínio, import engine, integrações e roadmap.
+
+O planejamento financeiro, os dois gráficos de salário e os gastos fixos estão descritos em [Visão geral financeira](docs/tbb/FINANCE_OVERVIEW.md). O [modo privado](docs/tbb/FINANCE_PRIVACY.md) protege valores e gráficos, com revelação por hover ou foco. O [simulador de crédito](docs/tbb/LOAN_SIMULATOR.md) compara cenários sem criar dívidas.
 
 Este repositório é independente do NutriOpus. A origem foi usada somente como snapshot inicial; credenciais, uploads, banco, containers e histórico operacional não são compartilhados.

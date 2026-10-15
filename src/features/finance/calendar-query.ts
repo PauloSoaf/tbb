@@ -23,7 +23,7 @@ export async function financeCalendarMonth(workspaceId: string, month: string, s
   const rows = await prisma.financeTransaction.findMany({
     where: { workspaceId, isConsumption: true, date: { gte: start, lt: end }, source: { not: "QUICK_INCOME" } },
     select: {
-      id: true, date: true, description: true, merchant: true, amountCents: true,
+      id: true, date: true, description: true, merchant: true, notes: true, amountCents: true,
       type: true, source: true, cardStatementId: true, postedDate: true, occurredAt: true, occurredTimezone: true,
       account: { select: { name: true, type: true } },
       category: { select: { name: true } },
@@ -37,6 +37,7 @@ export async function financeCalendarMonth(workspaceId: string, month: string, s
       day: row.date.toISOString().slice(0, 10),
       description: row.description,
       merchant: row.merchant,
+      notes: row.notes,
       amountCents: row.amountCents,
       type: row.type,
       source: row.source,

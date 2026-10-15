@@ -1059,3 +1059,194 @@ tbody tr:hover{background:color-mix(in srgb,var(--primary) 6%,var(--card))}
   .funding-compact-icon { display: none; }
   .funding-compact-details,.funding-compact-dismiss { width: 36px; height: 36px; }
 }
+
+/* Transactions grid: drafts on top, notes and details */
+.grid-note-button{display:inline-grid;place-items:center;width:30px;height:30px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--muted-foreground);opacity:.4;transition:opacity .15s,background .15s,color .15s}
+.finance-grid tr:hover .grid-note-button,.grid-note-button:focus-visible,.grid-note-button[data-has-note]{opacity:1}
+.grid-note-button[data-has-note]{color:var(--primary);background:color-mix(in srgb,var(--primary) 10%,transparent)}
+.grid-note-button:hover{background:var(--muted);color:var(--foreground)}
+.grid-header-static{cursor:default}
+.finance-grid tr[data-invalid] td,.finance-grid tr[data-invalid] th{box-shadow:inset 0 -2px color-mix(in srgb,var(--danger) 70%,transparent);background:color-mix(in srgb,var(--danger) 6%,var(--card))}
+.badge[data-unsaved]{background:color-mix(in srgb,var(--warning) 16%,var(--card));color:color-mix(in srgb,var(--warning) 70%,var(--foreground));border-color:color-mix(in srgb,var(--warning) 36%,transparent)}
+.excel-remove-draft{display:inline-grid;place-items:center;width:20px;height:20px;border:0;border-radius:5px;background:transparent;color:var(--muted-foreground)}
+.excel-remove-draft:hover{background:var(--muted);color:var(--danger)}
+.excel-note-multiline{display:inline-flex;align-items:center;gap:6px;max-width:100%;border:0;background:transparent;color:var(--foreground);font-size:.82rem;text-align:left}
+.excel-note-multiline svg{flex:0 0 auto;color:var(--primary)}
+.ledger-row{border-bottom:1px solid var(--border)}
+.ledger-row:last-child{border-bottom:0}
+.ledger-row>summary{cursor:pointer;list-style:none;border-bottom:0}
+.ledger-row>summary::-webkit-details-marker{display:none}
+.ledger-row>summary:hover{background:color-mix(in srgb,var(--muted) 45%,transparent)}
+.ledger-row[open]>summary{background:color-mix(in srgb,var(--primary) 5%,transparent)}
+.ledger-note-preview{display:flex;align-items:center;gap:5px;margin-top:3px;color:var(--muted-foreground);font-size:.76rem;line-height:1.35;max-width:62ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ledger-note-preview svg{flex:0 0 auto;color:var(--primary)}
+.ledger-details{display:flex;flex-direction:column;gap:10px;padding:4px 4px 16px}
+.ledger-draft{display:flex;flex-direction:column;gap:12px;margin:10px 0;padding:14px;border:1px dashed color-mix(in srgb,var(--primary) 45%,var(--border));border-radius:12px;background:color-mix(in srgb,var(--primary) 5%,var(--card))}
+.ledger-draft[data-invalid]{border-color:var(--danger)}
+.ledger-draft>header{display:flex;align-items:center;gap:10px}
+.ledger-draft>header .icon-button{margin-left:auto}
+.ledger-wide{grid-column:1/-1}
+.transaction-facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 16px;margin:0}
+.transaction-facts dt{font-size:.7rem;color:var(--muted-foreground)}
+.transaction-facts dd{margin:2px 0 0;font-size:.86rem;font-weight:550;overflow-wrap:anywhere}
+.transaction-details{width:min(520px,100vw)}
+.transaction-details-wide{grid-column:1/-1}
+.transaction-details textarea{min-height:110px}
+@media(max-width:640px){.transaction-details{width:100vw;border-radius:0}}
+
+.card-expense-wide{grid-column:1/-1}
+
+/* Statement provenance tooltip */
+.provenance-trigger{vertical-align:middle}
+.provenance-button{display:inline-grid;place-items:center;width:24px;height:24px;margin-left:4px;border:0;border-radius:6px;background:transparent;color:var(--muted-foreground);transition:background .15s,color .15s}
+.provenance-button:hover,.provenance-button:focus-visible{background:var(--muted);color:var(--foreground)}
+.provenance-button[data-stale]{color:var(--warning)}
+.provenance-tip{display:flex;flex-direction:column;gap:6px;min-width:15rem;max-width:20rem;font-weight:400;line-height:1.4}
+.provenance-tip dl{display:flex;flex-direction:column;gap:3px;margin:0}
+.provenance-tip dl>span{display:flex;justify-content:space-between;gap:12px}
+.provenance-tip dt{color:var(--muted-foreground);white-space:nowrap}
+.provenance-tip dd{margin:0;text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.provenance-tip small{display:block;color:var(--muted-foreground);font-size:.72rem}
+.provenance-stale{display:flex;flex-wrap:wrap;align-items:center;gap:5px;color:var(--warning)}
+.provenance-stale small{flex-basis:100%;color:inherit;font-weight:400}
+
+/* Mark a bill as paid */
+.statement-payment-dialog{width:min(640px,calc(100vw - 32px))}
+.payment-summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 16px;margin:0;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:color-mix(in srgb,var(--muted) 30%,transparent)}
+.payment-summary dt{font-size:.7rem;color:var(--muted-foreground)}
+.payment-summary dd{margin:2px 0 0;font-weight:600;font-variant-numeric:tabular-nums}
+.payment-summary .payment-owed{grid-column:1/-1;padding-top:8px;border-top:1px dashed var(--border)}
+.payment-summary .payment-owed dd{font-size:1.25rem;color:var(--credit-open)}
+.payment-modes{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;border:0}
+.payment-modes legend{margin-bottom:6px;font-size:.86rem;font-weight:650}
+.payment-modes label{flex-direction:row;align-items:flex-start;gap:10px;padding:11px 12px;border:1px solid var(--border);border-radius:11px;font-weight:450;cursor:pointer;transition:border-color .15s,background .15s}
+.payment-modes label[data-selected]{border-color:color-mix(in srgb,var(--primary) 60%,var(--border));background:color-mix(in srgb,var(--primary) 7%,var(--card))}
+.payment-modes input{width:16px;height:16px;margin-top:3px;accent-color:var(--primary)}
+.payment-modes label span{display:flex;flex-direction:column;gap:2px}
+.payment-modes small{color:var(--muted-foreground);font-size:.76rem}
+.payment-date{display:flex;flex-direction:column;gap:6px}
+.payment-wide{grid-column:1/-1}
+.payment-result{padding:12px 14px;border:1px solid color-mix(in srgb,var(--success) 40%,var(--border));border-radius:12px;background:color-mix(in srgb,var(--success) 8%,var(--card));font-size:.86rem}
+.payment-result ul{margin:6px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:3px}
+.payment-hint{margin:0;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--warning) 12%,var(--card));color:color-mix(in srgb,var(--warning) 60%,var(--foreground));font-size:.84rem}
+.payment-confirm{align-items:flex-start;font-size:.84rem;font-weight:450;line-height:1.45}
+.payment-confirm input{margin-top:3px}
+.payment-paid-cell{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.undo-payment{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:.8rem}
+
+/* Salary map */
+.finance-salary-section{margin-top:0}
+.salary-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+.salary-toggle{display:inline-flex;padding:3px;border:1px solid var(--border);border-radius:9px;background:var(--muted)}
+.salary-toggle button{padding:5px 11px;border:0;border-radius:6px;background:transparent;color:var(--muted-foreground);font-size:.78rem;font-weight:550}
+.salary-toggle button[aria-pressed="true"]{background:var(--card);color:var(--foreground);box-shadow:0 1px 2px #0000000f}
+.salary-body{display:grid;grid-template-columns:minmax(200px,260px) minmax(0,1fr);align-items:center;gap:22px;padding:6px 4px 4px}
+.salary-donut{position:relative;margin:0;width:100%;max-width:260px;justify-self:center}
+.salary-donut svg{display:block;width:100%;height:auto}
+.salary-arc{transition:opacity .15s,stroke-width .15s}
+.salary-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;pointer-events:none}
+.salary-center small{font-size:.7rem;color:var(--muted-foreground)}
+.salary-center strong{font-size:1.2rem;font-weight:650;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.salary-center span{font-size:.74rem;color:var(--muted-foreground)}
+.salary-center span[data-danger]{color:var(--danger);font-weight:600}
+.salary-side{display:flex;flex-direction:column;gap:10px;min-width:0}
+.salary-legend{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}
+.salary-legend button{display:grid;grid-template-columns:12px minmax(0,1fr) auto 52px;align-items:center;gap:10px;width:100%;padding:7px 9px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--foreground);font-size:.82rem;text-align:left;transition:background .15s,border-color .15s}
+.salary-legend button:hover,.salary-legend button[data-active]{background:var(--muted)}
+.salary-legend button[aria-pressed="true"]{border-color:color-mix(in srgb,var(--primary) 45%,var(--border))}
+.salary-legend i{display:block;width:12px;height:12px;border-radius:4px}
+.salary-legend-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.salary-legend b{font-variant-numeric:tabular-nums}
+.salary-legend em{color:var(--muted-foreground);font-style:normal;font-variant-numeric:tabular-nums;text-align:right}
+.salary-detail{padding:10px 12px;border:1px solid var(--border);border-radius:11px;background:color-mix(in srgb,var(--muted) 35%,transparent);font-size:.82rem}
+.salary-detail p{margin:3px 0 0}
+.salary-alert{display:flex;align-items:flex-start;gap:9px;margin-top:10px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--danger) 40%,var(--border));border-radius:11px;background:color-mix(in srgb,var(--danger) 8%,var(--card));color:var(--danger);font-size:.84rem;line-height:1.45}
+.salary-alert svg{flex:0 0 auto;margin-top:2px}
+.salary-note{margin:10px 0 0;color:var(--muted-foreground);font-size:.74rem;line-height:1.45}
+@media(max-width:720px){.salary-body{grid-template-columns:1fr}.salary-donut{max-width:230px}.salary-legend button{grid-template-columns:12px minmax(0,1fr) auto}.salary-legend em{display:none}}
+/* Loan and bill-installment simulator */
+.loan-simulator{gap:18px}
+.loan-disclaimer{display:flex;align-items:flex-start;gap:9px;margin:0;padding:11px 14px;border:1px solid color-mix(in srgb,var(--warning) 35%,var(--border));border-radius:12px;background:color-mix(in srgb,var(--warning) 9%,var(--card));font-size:.84rem;line-height:1.5}
+.loan-disclaimer svg{flex:0 0 auto;margin-top:2px;color:var(--warning)}
+.loan-budget{border:1px solid var(--border);border-radius:12px;background:color-mix(in srgb,var(--muted) 28%,transparent)}
+.loan-budget>summary{cursor:pointer;padding:11px 14px;font-size:.88rem;font-weight:600}
+.loan-budget>.form-grid{padding:4px 14px 14px}
+.loan-scenarios{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));align-items:start;gap:14px}
+.loan-scenario>summary{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-bottom:10px;cursor:pointer}
+.loan-scenario>summary .muted{font-size:.78rem}
+.loan-scenario .form-grid{margin-bottom:10px}
+.loan-check{flex-direction:row;align-items:center;gap:8px;font-weight:450}
+.loan-check input{width:16px;height:16px;flex:0 0 auto;accent-color:var(--primary)}
+.loan-extra{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:0;padding:10px 12px;border:1px dashed var(--border);border-radius:11px}
+.loan-extra legend{padding:0 6px;font-size:.78rem;font-weight:600}
+.loan-problems{margin:0;padding:10px 12px 10px 28px;border:1px solid color-mix(in srgb,var(--danger) 40%,var(--border));border-radius:11px;background:color-mix(in srgb,var(--danger) 8%,var(--card));color:var(--danger);font-size:.84rem}
+.loan-table{width:100%;border-collapse:collapse;font-size:.84rem}
+.loan-table th,.loan-table td{padding:9px 10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+.loan-table thead th{font-size:.72rem;font-weight:600;line-height:1.25;color:var(--muted-foreground);vertical-align:bottom}
+.loan-table tbody th,.loan-table thead th:first-child{position:sticky;left:0;z-index:1;background:var(--card)}
+.loan-table thead th:first-child{z-index:2}
+.loan-table tbody th{font-weight:500}
+.loan-table tr[data-best] th{background:color-mix(in srgb,var(--primary) 5%,var(--card))}
+.loan-table td.loan-term{white-space:nowrap}
+.loan-table tbody th strong{display:block;margin-bottom:3px}
+.loan-table tbody th .statement-chip{margin:2px 4px 0 0}
+.loan-table td small{display:block;font-size:.7rem;color:var(--muted-foreground)}
+.loan-table tr[data-best]{background:color-mix(in srgb,var(--primary) 5%,transparent)}
+.loan-table [data-negative]{color:var(--danger)}
+.loan-surplus small{display:inline;margin-left:4px}
+.loan-notes{display:flex;flex-direction:column;gap:6px;margin:0;padding:11px 14px 11px 30px;border:1px solid var(--border);border-radius:12px;background:color-mix(in srgb,var(--muted) 32%,transparent);font-size:.86rem;line-height:1.5}
+.loan-flag{display:flex;align-items:flex-start;gap:9px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--warning) 38%,var(--border));border-radius:11px;background:color-mix(in srgb,var(--warning) 9%,var(--card));font-size:.84rem;line-height:1.5}
+.loan-flag svg{flex:0 0 auto;margin-top:2px;color:var(--warning)}
+.loan-schedule{max-height:420px;overflow:auto}
+.loan-schedule thead th{position:sticky;top:0;background:var(--card)}
+.loan-save-name{flex:1 1 240px}
+.loan-saved{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.loan-saved li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:11px}
+.loan-saved li small{display:block;font-size:.74rem}
+@media(max-width:720px){.loan-scenarios{grid-template-columns:1fr}.loan-table{font-size:.8rem}}
+/* Salary plan: month selector, two charts, bills */
+.salary-months{display:inline-flex;align-items:center;gap:4px;padding:3px 6px;border:1px solid var(--border);border-radius:9px;background:var(--card)}
+.salary-months strong{min-width:9.5rem;text-align:center;font-size:.8rem;font-weight:650}
+.salary-months .icon-button:disabled{opacity:.35;cursor:default}
+.salary-pair{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));align-items:start;gap:16px}
+.salary-panel{container-type:inline-size;display:flex;flex-direction:column;gap:10px;min-width:0;padding:14px;border:1px solid var(--border);border-radius:14px;background:color-mix(in srgb,var(--muted) 18%,var(--card))}
+.salary-panel-head h3{margin:0;font-size:.95rem}
+.salary-panel-head p{margin:2px 0 0;color:var(--muted-foreground);font-size:.74rem;line-height:1.4}
+.salary-panel .salary-body{grid-template-columns:minmax(150px,200px) minmax(0,1fr);gap:16px;padding:4px 0}
+@container (max-width:480px){.salary-panel .salary-body{grid-template-columns:1fr}.salary-panel .salary-donut{max-width:210px}}
+.salary-panel .salary-alert{margin-top:0}
+.salary-detail-list{margin:4px 0 6px;padding-left:18px;font-size:.78rem}
+.salary-detail .button-secondary{margin:4px 0}
+.salary-hidden{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0;color:var(--muted-foreground);font-size:.78rem}
+.salary-hidden button{padding:3px 9px;border:1px dashed var(--border);border-radius:999px;background:transparent;color:var(--foreground);font-size:.74rem}
+.bank-product[data-ended]{opacity:.62}
+.salary-bill-summary{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 18px;border-bottom:1px solid var(--border)}
+.salary-bill-summary>div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.salary-bill-summary span,.salary-bill-summary small{font-size:.75rem;color:var(--muted-foreground);overflow-wrap:anywhere}
+.salary-bill-summary strong{font-size:1.08rem;font-variant-numeric:tabular-nums}
+.salary-legend-name small{display:flex;align-items:center;gap:3px;color:var(--muted-foreground);font-size:.65rem}
+.salary-members{list-style:none;padding:0;margin:8px 0;display:grid;gap:7px}
+.salary-members li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;font-size:.78rem}
+.salary-members span{overflow-wrap:anywhere}.salary-members small{display:block;font-size:.68rem;color:var(--muted-foreground)}
+.salary-members b{font-variant-numeric:tabular-nums;white-space:nowrap}
+.salary-covered{font-size:.76rem;padding:8px 10px;border:1px dashed var(--border);border-radius:8px}
+.salary-covered summary{cursor:pointer;color:var(--muted-foreground)}
+@media(max-width:560px){.salary-bill-summary{grid-template-columns:1fr;gap:10px}}
+.finance-privacy-scope,.finance-privacy-boundary{display:contents}
+[data-finance-number]{display:inline-block}
+.finance-privacy-scope[data-finance-private=true] [data-finance-number]{filter:blur(6px);user-select:none}
+.finance-privacy-scope[data-finance-private=true] [data-finance-number]:is(:focus-visible,:focus-within){filter:none;user-select:text}
+@media(hover:hover){.finance-privacy-scope[data-finance-private=true] [data-finance-number]:hover{filter:none;user-select:text}}
+.finance-privacy-toggle[data-active]{color:var(--primary);background:color-mix(in srgb,var(--primary) 12%,transparent)}
+.finance-privacy-scope[data-finance-private=true]:not([data-privacy-ready=true]) #main-content{filter:blur(7px);user-select:none}
+html[data-finance-private=true] [data-finance-sensitive]{filter:blur(6px);transition:filter .12s ease;user-select:none}
+html[data-finance-private=true] [data-finance-sensitive]:focus-visible,
+html[data-finance-private=true] [data-finance-sensitive]:focus-within,
+html[data-finance-private=true] :is(a,button):focus-visible [data-finance-sensitive]{filter:none;user-select:text}
+html[data-finance-private=true] [data-finance-sensitive]:focus-visible{outline:1px dashed var(--primary);outline-offset:3px;border-radius:3px}
+@media(hover:hover){html[data-finance-private=true] [data-finance-sensitive]:hover{filter:none;user-select:text}html[data-finance-private=true]:has([data-finance-sensitive=chart]:hover) [class*=text-chart-tooltip] [data-finance-sensitive]{filter:none}}
+html[data-finance-private=true]:has([data-finance-sensitive=chart]:focus-visible,[data-finance-sensitive=chart]:focus-within) [class*=text-chart-tooltip] [data-finance-sensitive]{filter:none}
+@media(prefers-reduced-motion:reduce){html[data-finance-private=true] [data-finance-sensitive]{transition:none}}
+@media(hover:hover){html[data-finance-private=true]:has([aria-describedby]:hover) :is([role=tooltip][data-finance-sensitive],[role=tooltip] [data-finance-sensitive]){filter:none}}
+html[data-finance-private=true]:has([aria-describedby]:focus-within) :is([role=tooltip][data-finance-sensitive],[role=tooltip] [data-finance-sensitive]){filter:none}
+@media(max-width:360px){.topbar-actions:has(.finance-privacy-toggle){gap:4px}.topbar-actions:has(.finance-privacy-toggle) .topbar-control>span,.topbar-actions:has(.finance-privacy-toggle) button>span.text-sm.font-medium{display:none}}

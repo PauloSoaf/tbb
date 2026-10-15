@@ -46,6 +46,7 @@ const DYNAMIC: { pattern: RegExp; trail: (match: RegExpMatchArray) => RouteTrail
     return section ? { crumbs: [...menuTrail("/finance/investments"), { href: null, label: { kind: "investment", key: section.key } }], parentHref: "/finance/investments", keepParams: ["scope"] } : null;
   } },
   { pattern: /^\/partner\/accept\/[^/]+$/, trail: () => ({ crumbs: [...menuTrail("/settings"), i18n("crumb.partner_invite")], parentHref: "/settings", keepParams: [] }) },
+  { pattern: /^\/finance\/debts\/simulator$/, trail: () => ({ crumbs: [...menuTrail("/finance/debts"), i18n("crumb.simulator")], parentHref: "/finance/debts", keepParams: [] }) },
   { pattern: /^\/weekly-review$/, trail: () => ({ crumbs: [...menuTrail("/today"), i18n("crumb.weekly_review")], parentHref: "/today", keepParams: [] }) },
 ];
 

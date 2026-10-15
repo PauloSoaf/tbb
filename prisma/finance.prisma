@@ -43,6 +43,10 @@ model Account {
   cardStatements CardStatement[]
   @@unique([id, workspaceId])
   @@index([workspaceId, isArchived])
+  financialSources FinancialSource[]
+  statementPayments CardStatementPayment[]
+  financialSnapshots FinancialSnapshot[]
+  fixedExpensesOnCard FixedExpense[] @relation("FixedExpenseCard")
 }
 
 enum CardStatementKind {
@@ -100,6 +104,12 @@ model CardStatement {
   @@unique([workspaceId, externalKey])
   @@unique([workspaceId, accountId, periodKey])
   @@index([workspaceId, status, dueDate])
+  payments CardStatementPayment[]
+  rolledIntoStatementId String?
+  rolledIntoStatement CardStatement? @relation("StatementRollover", fields: [rolledIntoStatementId, accountId, workspaceId], references: [id, accountId, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  rolledFrom CardStatement[] @relation("StatementRollover")
+  amountIsOutstanding Boolean @default(false)
+  @@index([rolledIntoStatementId, accountId, workspaceId])
 }
 
 model FinanceCategory {
@@ -166,6 +176,20 @@ model FinanceTransaction {
   @@index([workspaceId, accountId, date])
   @@index([workspaceId, importBatchId])
   @@index([workspaceId, cardStatementId])
+  purchasedDate DateTime? @db.Date
+  postedDate DateTime? @db.Date
+  occurredAt DateTime?
+  occurredTimezone String?
+  dateBasis String @default("MANUAL")
+  eventKind String @default("PURCHASE")
+  isConsumption Boolean @default(true)
+  originalAmountCents Int?
+  originalCurrency String?
+  exchangeRate String?
+  subscriptionId String?
+  evidence FinancialEvidence[]
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  @@index([subscriptionId])
 }
 
 // How a card purchase relates to the statement it is detailed under: already part of the
@@ -212,6 +236,11 @@ model Subscription {
   account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
   category FinanceCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   @@index([workspaceId, status, nextChargeDate])
+  nextChargeIsEstimate Boolean @default(false)
+  amountIsEstimate Boolean @default(false)
+  originalAmountCents Int?
+  originalCurrency String?
+  transactions FinanceTransaction[]
 }
 
 model Debt {
@@ -233,6 +262,7 @@ model Debt {
   updatedAt DateTime @updatedAt
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   @@index([workspaceId, status])
+  personalAssets PersonalAsset[]
 }
 
 model SavingsGoal {
@@ -803,8 +833,150 @@ model FixedExpense {
   dueDay Int?
   notes String?
   isActive Boolean @default(true)
+  // Last day the monthly expense is expected; null means it has no end.
+  endsOn DateTime? @db.Date
+  // Credit card the expense is charged to: it lands in that card statement, so plans net it out of the bill.
+  cardAccountId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  cardAccount Account? @relation("FixedExpenseCard", fields: [cardAccountId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
   @@index([workspaceId, isActive])
+  @@index([cardAccountId, workspaceId])
+}
+
+enum PersonalAssetKind {
+  VEHICLE
+  ELECTRONIC
+  PROPERTY
+  OTHER
+}
+
+model PersonalAsset {
+  id String @id @default(cuid())
+  workspaceId String
+  name String
+  kind PersonalAssetKind
+  valueCents Int
+  valuationDate DateTime @db.Date
+  purchaseValueCents Int?
+  purchaseDate DateTime? @db.Date
+  notes String?
+  debtId String?
+  archivedAt DateTime?
+  version Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  debt Debt? @relation(fields: [debtId], references: [id], onDelete: SetNull)
+  @@index([workspaceId, archivedAt])
+  @@index([debtId])
+}
+
+// Originals and candidate evidence are private to the workspace owner. Source identities
+// use content hash + account; row identities never masquerade as an issuer external ID.
+model FinancialSource {
+  id String @id @default(cuid())
+  workspaceId String
+  accountId String
+  sha256 String
+  fileName String
+  mediaType String
+  content Bytes
+  byteLength Int
+  importBatchId String?
+  createdAt DateTime @default(now())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId, workspaceId], references: [id, workspaceId], onDelete: NoAction)
+  evidence FinancialEvidence[]
+  snapshots FinancialSnapshot[]
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, accountId, sha256])
+  @@index([importBatchId])
+}
+
+model FinancialEvidence {
+  id String @id @default(cuid())
+  workspaceId String
+  sourceId String
+  locator String
+  candidate Json
+  originalCandidate Json
+  version Int @default(1)
+  decision String @default("NEEDS_REVIEW")
+  reason String?
+  transactionId String?
+  paymentId String?
+  importBatchId String?
+  reviewedByUserId String?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  source FinancialSource @relation(fields: [sourceId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  transaction FinanceTransaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  payment CardStatementPayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  @@unique([sourceId, locator])
+  @@index([workspaceId, decision])
+  @@index([transactionId])
+  @@index([paymentId])
+  @@index([importBatchId])
+}
+
+model FinancialSnapshot {
+  id String @id @default(cuid())
+  workspaceId String
+  accountId String
+  sourceId String
+  locator String
+  asOfDate DateTime @db.Date
+  kind String
+  payload Json
+  statementId String?
+  createdAt DateTime @default(now())
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId, workspaceId], references: [id, workspaceId], onDelete: NoAction)
+  source FinancialSource @relation(fields: [sourceId, workspaceId], references: [id, workspaceId], onDelete: NoAction)
+  @@unique([sourceId, locator])
+  @@index([workspaceId, accountId, kind, asOfDate])
+  @@index([statementId])
+}
+
+// Issuer payment evidence changes the liability; never salary or fabricated cash movement.
+model CardStatementPayment {
+  id String @id @default(cuid())
+  workspaceId String
+  accountId String
+  cardStatementId String?
+  fingerprint String
+  amountCents Int
+  // Null only for payments the user declared without knowing the exact day; documents always carry one.
+  date DateTime? @db.Date
+  // DOCUMENT: read from a bank document. MANUAL_VERIFIED: declared by the owner and confirmed in the app.
+  origin String @default("DOCUMENT")
+  sourceId String
+  locator String
+  importBatchId String?
+  createdAt DateTime @default(now())
+  evidence FinancialEvidence[]
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId, workspaceId], references: [id, workspaceId], onDelete: NoAction)
+  cardStatement CardStatement? @relation(fields: [cardStatementId, accountId, workspaceId], references: [id, accountId, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  @@unique([workspaceId, fingerprint])
+  @@index([cardStatementId, accountId, workspaceId])
+  @@index([workspaceId, accountId, date])
+  @@index([importBatchId])
+}
+
+// A saved comparison of credit options (inputs only; results are recomputed). It is a study, never a debt:
+// simulating or saving one creates no Debt, no installment and no change to any statement.
+model LoanComparison {
+  id String @id @default(cuid())
+  workspaceId String
+  name String
+  version Int @default(1)
+  payload Json
+  createdByUserId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId, updatedAt])
 }

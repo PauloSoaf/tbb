@@ -41,6 +41,13 @@ describe("route breadcrumbs",()=>{
     expect(resolveRouteTrail("/admin").crumbs.at(-1)?.label).toEqual({kind:"i18n",key:"nav.admin"});
     expect(resolveRouteTrail("/finance/imports").crumbs.at(-1)?.label).toEqual({kind:"i18n",key:"crumb.investment_import"});
   });
+  it("gives the credit simulator its own crumb under Debts, and Back leads to Debts",()=>{
+    const trail=resolveRouteTrail("/finance/debts/simulator");
+    expect(trail.parentHref).toBe("/finance/debts");
+    expect(trail.crumbs.at(-1)?.label).toEqual({kind:"i18n",key:"crumb.simulator"});
+    expect(trail.crumbs.at(-2)).toMatchObject({href:"/finance/debts",label:{kind:"i18n",key:"nav.debts"}});
+    expect(resolveRouteTrail("/finance/debts/simulator/")).toEqual(trail);
+  });
   it("uses the nearest registered ancestor for unknown paths and normalizes trailing slash",()=>{
     expect(resolveRouteTrail("/finance/accounts/unknown/deeper").parentHref).toBe("/finance/accounts");
     expect(resolveRouteTrail("/unknown").parentHref).toBe("/today");

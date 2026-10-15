@@ -9,7 +9,7 @@ type ReportRows={
   transactions:LedgerRow[];
   debts:{name:string;status:string;remainingBalanceCents:number;originalAmountCents:number;minimumPaymentCents:number;dueDay:number|null;interestBasisPoints:number;ratePeriod:string;targetPayoffDate:string|null}[];
   subscriptions:{name:string;status:string;amountCents:number;billingCycle:string;nextChargeDate:string;account:string|null;nextChargeIsEstimate?:boolean;amountIsEstimate?:boolean;originalCurrency?:string|null;originalAmountCents?:number|null}[];
-  payments?:{account:string;date:string;amountCents:number;statement:string|null}[];
+  payments?:{account:string;date:string|null;amountCents:number;statement:string|null}[];
   pending?:{fileName:string;locator:string;reason:string}[];
   investments:{name:string;account:string;currentValueCents:number;bookCostCents:number}[];
   goals:{name:string;status:string;currentAmountCents:number;targetAmountCents:number;targetDate:string|null}[];
@@ -38,7 +38,7 @@ export function buildFinancialReport(data:FinanceOverviewData,rows:ReportRows){
     funding ? `${funding.hasCash?`Dinheiro registrado para pagar: ${money(funding.cashCents)}. Falta para cobrir as faturas abertas: ${money(funding.shortfallCents)}.`:'Saldo de dinheiro não informado; cobertura desconhecida.'} ${funding.overdueCount} fatura(s) vencida(s). ${funding.missingStatementCount} cartão(ões) sem faturas registradas. A possível dívida é calculada, não uma dívida financiada cadastrada.`:'Cobertura não disponível.',
     table(['Mês de vencimento','Faturas conhecidas','Acumulado','Falta acumulada com caixa de hoje'],funding?.timeline.map((p)=>[p.month,money(p.amountCents),money(p.cumulativeCents),funding.hasCash?money(p.shortfallCents):'Desconhecida'])||[]),
     "## Gastos fixos previstos",
-    table(['Gasto','Valor mensal','Dia previsto','Observações'],data.plannedFixed.map((f)=>[f.name,money(f.amountCents),f.dueDay,f.notes])),
+    table(['Gasto','Valor mensal','Dia previsto','Termina em','Cobrado no cartão','Observações'],data.plannedFixed.map((f)=>[f.name,money(f.amountCents),f.dueDay,f.endsOn??'Sem data de término',data.creditCards.find((card)=>card.id===f.cardAccountId)?.name??(f.cardAccountId?'Cartão arquivado':'Não'),f.notes])),
     "## Assinaturas e compromissos recorrentes",
     table(['Nome','Status','Valor por ciclo','Ciclo','Próxima cobrança','Conta','Plano original'],rows.subscriptions.map((s)=>[s.name,s.status,`${money(s.amountCents)}${s.amountIsEstimate?' (estimado)':''}`,s.billingCycle,`${s.nextChargeDate}${s.nextChargeIsEstimate?' (estimada)':''}`,s.account,s.originalCurrency&&s.originalAmountCents?money(s.originalAmountCents,s.originalCurrency):'BRL'])),
     "## Dívidas efetivas",

@@ -29,7 +29,7 @@ export function CardExpenseDialog({ cards, categories, statements, today, onSave
   const [mode, setMode] = useState<"text" | "manual">("text");
   const [text, setText] = useState("");
   const [provider, setProvider] = useState<string | null>(null);
-  const [form, setForm] = useState({ accountId: cards[0]?.id ?? "", amount: "", description: "", date: today, merchant: "", categoryId: "", installments: "1" });
+  const [form, setForm] = useState({ accountId: cards[0]?.id ?? "", amount: "", description: "", date: today, merchant: "", categoryId: "", installments: "1", notes: "" });
   const [choice, setChoice] = useState("auto");
   const [link, setLink] = useState<StatementDetailMode | null>(null);
   const [error, setError] = useState("");
@@ -68,7 +68,7 @@ export function CardExpenseDialog({ cards, categories, statements, today, onSave
       const result = await interpretCardExpense(fd);
       if ("error" in result) { setError(result.error ?? "Não foi possível interpretar o gasto."); return; }
       const draft = result.draft;
-      setForm({ accountId: draft.accountId ?? form.accountId, amount: draft.amountCents ? moneyInput(draft.amountCents) : "", description: draft.description, date: draft.date, merchant: draft.merchant ?? "", categoryId: draft.categoryId ?? "", installments: String(draft.installments) });
+      setForm({ accountId: draft.accountId ?? form.accountId, amount: draft.amountCents ? moneyInput(draft.amountCents) : "", description: draft.description, date: draft.date, merchant: draft.merchant ?? "", categoryId: draft.categoryId ?? "", installments: String(draft.installments), notes: form.notes });
       setProvider(draft.provider);
       setChoice("auto");
       setLink(null);
@@ -91,7 +91,7 @@ export function CardExpenseDialog({ cards, categories, statements, today, onSave
       onSaved?.(form.date);
       setText("");
       setProvider(null);
-      setForm((current) => ({ ...current, amount: "", description: "", merchant: "", categoryId: "", installments: "1", date: today }));
+      setForm((current) => ({ ...current, amount: "", description: "", merchant: "", categoryId: "", installments: "1", notes: "", date: today }));
       router.refresh();
     });
   }
@@ -119,6 +119,7 @@ export function CardExpenseDialog({ cards, categories, statements, today, onSave
             <label>Estabelecimento<input value={form.merchant} onChange={(event) => update({ merchant: event.target.value })} maxLength={200} placeholder="Opcional"/></label>
             <label>Categoria<select value={form.categoryId} onChange={(event) => update({ categoryId: event.target.value })}><option value="">Sem categoria</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
             <label>Parcelas<input type="number" min={1} max={24} value={form.installments} onChange={(event) => update({ installments: event.target.value })}/></label>
+            <label className="card-expense-wide">Observação (opcional)<textarea rows={2} maxLength={2000} value={form.notes} onChange={(event) => update({ notes: event.target.value })} placeholder="Ex.: dividido com Alexandre"/></label>
             <label>Fatura<select value={choice} onChange={(event) => { setChoice(event.target.value); setLink(null); }}>
               <option value="auto">{suggestion ? `Sugerida: vence ${day(suggestion.dueDate)}${suggestion.estimated ? " (fechamento estimado)" : ""}` : "Sugestão indisponível para esta data"}</option>
               {cardStatements.map((item) => <option key={item.id} value={item.id}>{label(item)}</option>)}

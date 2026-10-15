@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { Calculator, GripHorizontal, Maximize2, Minus, RotateCcw, X } from "lucide-react";
 import { ProfessionalCalculator } from "./ProfessionalCalculator";
@@ -16,17 +16,21 @@ function clamp(position:Position){
   };
 }
 
-export function FloatingCalculatorWindow({workspaceId,open,minimized,onClose,onMinimize,onRestore}:{workspaceId:string;open:boolean;minimized:boolean;onClose:()=>void;onMinimize:()=>void;onRestore:()=>void}){
-  const [mounted,setMounted]=useState(false);
-  const [position,setPosition]=useState<Position>({x:24,y:84});
+type WindowProps={workspaceId:string;open:boolean;minimized:boolean;onClose:()=>void;onMinimize:()=>void;onRestore:()=>void};
+const subscribeToClient=()=>()=>{};
+export function FloatingCalculatorWindow(props:WindowProps){
+  const mounted=useSyncExternalStore(subscribeToClient,()=>true,()=>false);
+  return mounted?<CalculatorWindow {...props}/>:null;
+}
+
+function CalculatorWindow({workspaceId,open,minimized,onClose,onMinimize,onRestore}:WindowProps){
+  const [position,setPosition]=useState<Position>(()=>{
+    const fallback={x:Math.max(12,window.innerWidth-size.width-82),y:84};
+    try{const saved=JSON.parse(localStorage.getItem("tbb-calculator-window-position")||"null");return clamp(saved&&Number.isFinite(saved.x)&&Number.isFinite(saved.y)?saved:fallback)}catch{return clamp(fallback)}
+  });
   const [dragging,setDragging]=useState(false);
   const dragRef=useRef<{pointerX:number;pointerY:number;origin:Position}|null>(null);
 
-  useEffect(()=>{
-    setMounted(true);
-    const fallback={x:Math.max(12,window.innerWidth-size.width-82),y:84};
-    try{const saved=localStorage.getItem("tbb-calculator-window-position");setPosition(clamp(saved?JSON.parse(saved):fallback))}catch{setPosition(clamp(fallback))}
-  },[]);
   useEffect(()=>{
     if(!dragging)return;
     const move=(event:PointerEvent)=>{if(!dragRef.current)return;setPosition(clamp({x:dragRef.current.origin.x+event.clientX-dragRef.current.pointerX,y:dragRef.current.origin.y+event.clientY-dragRef.current.pointerY}))};
@@ -36,9 +40,9 @@ export function FloatingCalculatorWindow({workspaceId,open,minimized,onClose,onM
     return()=>{window.removeEventListener("pointermove",move);window.removeEventListener("pointerup",stop)};
   },[dragging]);
   useEffect(()=>{
-    if(!mounted||dragging)return;
-    localStorage.setItem("tbb-calculator-window-position",JSON.stringify(position));
-  },[dragging,mounted,position]);
+    if(dragging)return;
+    try{localStorage.setItem("tbb-calculator-window-position",JSON.stringify(position))}catch{}
+  },[dragging,position]);
   useEffect(()=>{
     const resize=()=>setPosition(current=>clamp(current));
     window.addEventListener("resize",resize);
@@ -52,7 +56,7 @@ export function FloatingCalculatorWindow({workspaceId,open,minimized,onClose,onM
   }
   function resetPosition(){setPosition(clamp({x:Math.max(12,window.innerWidth-size.width-82),y:84}))}
 
-  if(!mounted||!open)return null;
+  if(!open)return null;
   return createPortal(<section className="floating-calculator-window" data-minimized={minimized||undefined} data-dragging={dragging||undefined} style={{left:position.x,top:position.y,width:size.width}} aria-label="Calculadora profissional flutuante">
     <div className="floating-calculator-titlebar" onPointerDown={startDrag}>
       <div><span className="floating-calculator-icon"><Calculator size={17}/></span><span><strong>Calculadora</strong><small>{minimized?"Minimizada":"Janela flutuante"}</small></span></div>

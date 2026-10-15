@@ -11,6 +11,8 @@ interface AppTooltipProps {
   align?: "start" | "center" | "end";
   delayMs?: number;
   disabled?: boolean;
+  /** Touch screens have no hover: a tap opens and closes the tooltip. Mouse and keyboard keep hover/focus. */
+  touchToggle?: boolean;
 }
 
 const VIEWPORT_PADDING = 8;
@@ -28,12 +30,14 @@ export function AppTooltip({
   align = "center",
   delayMs = 80,
   disabled = false,
+  touchToggle = false,
 }: AppTooltipProps) {
   const tooltipId = useId();
   const triggerRef = useRef<HTMLSpanElement>(null);
   const tooltipRef = useRef<HTMLSpanElement>(null);
   const showTimerRef = useRef<number | null>(null);
   const hideTimerRef = useRef<number | null>(null);
+  const pointerTypeRef = useRef<string>("mouse");
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0, ready: false });
   const visible = open && !disabled;
@@ -99,12 +103,12 @@ export function AppTooltip({
   }, [align, side]);
 
   const show = useCallback(() => {
-    if (disabled) return;
+    if (disabled || (touchToggle && pointerTypeRef.current === "touch")) return;
     clearTimers();
     showTimerRef.current = window.setTimeout(() => {
       setOpen(true);
     }, delayMs);
-  }, [clearTimers, delayMs, disabled]);
+  }, [clearTimers, delayMs, disabled, touchToggle]);
 
   const hide = useCallback(() => {
     clearTimers();
@@ -115,6 +119,16 @@ export function AppTooltip({
   }, [clearTimers]);
 
   useEffect(() => () => clearTimers(), [clearTimers]);
+
+  useEffect(() => {
+    if (!visible || !touchToggle) return;
+    // A tap anywhere else closes a tooltip that was opened by touch.
+    const closeOutside = (event: PointerEvent) => {
+      if (!triggerRef.current?.contains(event.target as Node)) { setOpen(false); setPosition((current) => ({ ...current, ready: false })); }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [visible, touchToggle]);
 
   useEffect(() => {
     if (!visible) return;
@@ -141,6 +155,8 @@ export function AppTooltip({
       ref={triggerRef}
       className={`inline-flex ${className}`}
       aria-describedby={visible ? tooltipId : undefined}
+      onPointerDown={touchToggle ? (event) => { pointerTypeRef.current = event.pointerType; } : undefined}
+      onClick={touchToggle ? () => { if (pointerTypeRef.current === "touch" && !disabled) { clearTimers(); setOpen((current) => !current); if (open) setPosition((current) => ({ ...current, ready: false })); } } : undefined}
       onMouseEnter={show}
       onMouseLeave={hide}
       onFocus={show}

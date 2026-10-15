@@ -27,7 +27,7 @@ export async function exportFinancialReport(){
     subscriptions:subscriptions.map((s)=>({...s,nextChargeDate:day(s.nextChargeDate)!,account:s.account?.name||null})),
     goals:goals.map((g)=>({...g,targetDate:day(g.targetDate)})),
     investments:investments.map((i)=>({name:i.asset.name,account:i.account.name,currentValueCents:i.currentValueCents,bookCostCents:i.bookCostCents})),
-    payments:payments.map(p=>({account:p.account.name,date:day(p.date)!,amountCents:p.amountCents,statement:p.cardStatement?.referenceMonth||day(p.cardStatement?.dueDate||null)})),
+    payments:payments.map(p=>({account:p.account.name,date:day(p.date),amountCents:p.amountCents,statement:p.cardStatement?.referenceMonth||day(p.cardStatement?.dueDate||null)})),
     pending:pending.map(p=>({fileName:p.source.fileName,locator:p.locator,reason:p.reason||(p.candidate as {problems?:string[]}).problems?.join(" · ")||"Necessita revisão"})),
   })};
 }

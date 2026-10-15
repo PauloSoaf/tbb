@@ -1,3 +1,4 @@
+import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import { PersonalAssetsPage } from "@/features/finance/PersonalAssetsPage";
 import { personalAssetRows } from "@/features/finance/personal-asset-query";
 import { dayKey } from "@/lib/dates";
@@ -13,5 +14,5 @@ export default async function AssetsPage() {
     personalAssetRows(ctx.workspaceId, true),
     prisma.debt.findMany({ where: { workspaceId: ctx.workspaceId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
-  return <PersonalAssetsPage assets={assets} debts={debts} canWrite={canWrite} today={dayKey(new Date(), ctx.workspace.timezone)}/>;
+  return <FinancePrivacyBoundary><PersonalAssetsPage assets={assets} debts={debts} canWrite={canWrite} today={dayKey(new Date(), ctx.workspace.timezone)}/></FinancePrivacyBoundary>;
 }

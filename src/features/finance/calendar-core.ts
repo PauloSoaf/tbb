@@ -6,6 +6,7 @@ export type FinanceCalendarEntry = {
   day: string;
   description: string;
   merchant: string | null;
+  notes?: string | null;
   amountCents: number;
   type: CalendarTransactionType;
   source: string;

@@ -30,6 +30,7 @@ import { NaturalLanguageCapture } from "./NaturalLanguageCapture";
 import { FinancePlanningRow } from "./FinancePlanningRow";
 import { CreditLimitBreakdown } from "./CreditLimitBreakdown";
 import { FixedExpensesDialog } from "./FixedExpensesDialog";
+import { SalaryAllocationCard } from "./SalaryAllocationCard";
 import { AppTooltip } from "@/components/ui/AppTooltip";
 import { FinanceOverviewHeader } from "./FinanceOverviewHeader";
 import { FinanceSectionNav } from "./FinanceSectionNav";
@@ -53,6 +54,8 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
   const currency = (cents: number) => new Intl.NumberFormat(language, { style: "currency", currency: "BRL", maximumFractionDigits: cents % 100 ? 2 : 0 }).format(cents / 100);
   const date = (day: string) => new Intl.DateTimeFormat(language, { day: "2-digit", month: "short", timeZone: "UTC" }).format(new Date(`${day}T00:00:00.000Z`)).replace(".", "");
   const metrics = data.metrics;
+  const cardOptions = data.creditCards.map(({ id, name }) => ({ id, name }));
+  const currentMonth = data.today.slice(0, 7);
   const assetCopy = personalAssetCopy(locale);
   const incomeUse = percent(metrics.committedIncomeCents, metrics.incomeReferenceCents);
   const goalProgress = metrics.savingsTargetCents ? Math.min(100, percent(metrics.totalSavingsCents, metrics.savingsTargetCents)) : 0;
@@ -91,7 +94,7 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
         {kpis.map((item, index) => <RevealOnScroll key={item.label} delay={index * .035} className="finance-kpi-reveal">
           <article className="finance-kpi" data-tone={item.tone}>
             <span className="finance-kpi-icon"><item.icon size={16}/></span>
-            <div><small>{item.label}</small><strong><NumberFlow value={item.value / 100} format={{ style: "currency", currency: "BRL", maximumFractionDigits: item.value % 100 ? 2 : 0 }} locales={language}/></strong>{index === 0 ? <AppTooltip content={<div><p>{assetCopy.financial}: {currency(metrics.financialNetWorthCents)}</p><p>{assetCopy.physical}: {currency(metrics.personalAssetsCents)}</p><p>{assetCopy.netWorthHint}</p><p>{assetCopy.liquidHint}</p></div>}><Link href="/finance/assets" className="finance-wealth-assets-link">{data.personalAssets.length ? `${assetCopy.assets}: ${currency(metrics.personalAssetsCents)} · ${assetCopy.view}` : assetCopy.newAsset} →</Link></AppTooltip> : <span>{item.context}</span>}</div>
+            <div><small>{item.label}</small><strong data-finance-number><NumberFlow value={item.value / 100} format={{ style: "currency", currency: "BRL", maximumFractionDigits: item.value % 100 ? 2 : 0 }} locales={language}/></strong>{index === 0 ? <AppTooltip content={<div><p>{assetCopy.financial}: {currency(metrics.financialNetWorthCents)}</p><p>{assetCopy.physical}: {currency(metrics.personalAssetsCents)}</p><p>{assetCopy.netWorthHint}</p><p>{assetCopy.liquidHint}</p></div>}><Link href="/finance/assets" className="finance-wealth-assets-link">{data.personalAssets.length ? `${assetCopy.assets}: ${currency(metrics.personalAssetsCents)} · ${assetCopy.view}` : assetCopy.newAsset} →</Link></AppTooltip> : <span>{item.context}</span>}</div>
           </article>
         </RevealOnScroll>)}
       </section>
@@ -122,7 +125,7 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
         <RevealOnScroll className="finance-usage-reveal" delay={.06}>
           <article className="finance-overview-card finance-income-usage">
             <header className="finance-card-heading"><div><span className="finance-card-icon tone-warning"><CircleDollarSign size={17}/></span><div><h2>{t("incomeUsage")} <AppTooltip content="Planejamento da renda prevista: gastos fixos mensais e despesas variáveis já registradas. Não soma o total das faturas nem parcelas futuras. Gasolina, cabelo, comida e diarista podem ser previstos mesmo se você pretende pagar no crédito. O que sobra aqui não é o saldo do banco."><button className="icon-button" type="button" aria-label="Como funciona o uso da renda">?</button></AppTooltip></h2><p>Fixos previstos e variáveis registrados em relação à renda prevista.</p></div></div></header>
-            <div className="finance-fixed-shortcut"><FixedExpensesDialog expenses={data.plannedFixed}/></div>
+            <div className="finance-fixed-shortcut"><FixedExpensesDialog expenses={data.plannedFixed} cards={cardOptions} currentMonth={currentMonth}/></div>
             {metrics.incomeReferenceCents ? <>
               <div className="income-usage-score" data-danger={incomeUse >= 100 || undefined}><strong>{incomeUse}%</strong><span>da renda prevista comprometida</span></div>
               <FinanceIncomeUsageChart fixed={metrics.fixedCents / 100} variable={metrics.variableCents / 100} available={metrics.availableCents / 100} labels={{ fixed: "Fixos previstos", variable: t("variable"), available: "Sobra prevista" }}/>
@@ -136,6 +139,8 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
         </RevealOnScroll>
       </section>
 
+      <section id="salario" className="finance-salary-section"><RevealOnScroll><SalaryAllocationCard plan={data.salaryPlan} expenses={data.plannedFixed} cards={cardOptions} currentMonth={currentMonth}/></RevealOnScroll></section>
+
       <section className="finance-secondary-grid">
         <RevealOnScroll><article className="finance-overview-card finance-category-card">
           <header className="finance-card-heading"><div><span className="finance-card-icon tone-purple"><Sparkles size={17}/></span><div><h2>{t("categories")}</h2><p>{t("categoriesHint")}</p></div></div></header>
@@ -143,7 +148,7 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
         </article></RevealOnScroll>
         <RevealOnScroll delay={.05}><article className="finance-overview-card finance-savings-card">
           <header className="finance-card-heading"><div><span className="finance-card-icon tone-success"><PiggyBank size={17}/></span><div><h2>{t("savings")}</h2><p>{t("savingsHint")}</p></div></div></header>
-          <div className="finance-savings-value" data-negative={metrics.savingsCents < 0 || undefined}><NumberFlow value={metrics.savingsCents / 100} format={{ style: "currency", currency: "BRL", maximumFractionDigits: 0 }} locales={language}/><span>{metrics.incomeCents ? `${Math.round(metrics.savingsCents / metrics.incomeCents * 100)}%` : "—"}</span></div>
+          <div className="finance-savings-value" data-negative={metrics.savingsCents < 0 || undefined}><strong data-finance-number><NumberFlow value={metrics.savingsCents / 100} format={{ style: "currency", currency: "BRL", maximumFractionDigits: 0 }} locales={language}/></strong><span>{metrics.incomeCents ? `${Math.round(metrics.savingsCents / metrics.incomeCents * 100)}%` : "—"}</span></div>
           {metrics.savingsTargetCents ? <div className="finance-goal-progress"><div><span>{currency(metrics.totalSavingsCents)} {t("goalsSaved")}</span><strong>{goalProgress}% {t("goalProgress")}</strong></div><span><i style={{ width: `${goalProgress}%` }}/></span></div> : <div className="finance-goal-empty"><Target size={19}/><span>{t("noGoals")}</span><Link href="/finance/savings">{t("createGoal")}</Link></div>}
           <div className="finance-savings-comparison"><span>{t("previousMonth")}</span><strong>{currency(metrics.previousBalanceCents)}</strong></div>
         </article></RevealOnScroll>

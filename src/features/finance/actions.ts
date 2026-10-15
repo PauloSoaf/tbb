@@ -12,6 +12,7 @@ import { CsvFinanceImportParser, previewCsv, transactionFingerprint, type Import
 import { applyCardStatementImport, previewCardStatementImport } from "./card-statement-import";
 import { statementLinkError } from "./card-statements";
 import { interpretCardExpenseText } from "./natural-language";
+import { NOTE_MAX, normalizeNote } from "./transaction-notes";
 import { ensureUnassignedAccount } from "./unassigned-account";
 import { rollbackFinancialDocument } from "./document-import";
 
@@ -166,7 +167,12 @@ export async function saveFixedExpense(fd:FormData){
   const ctx=await requirePermission("WRITE");
   try{
     const id=text(fd,"id");
-    const data={name:name(fd),amountCents:cents(fd,"amount"),dueDay:integer(fd,"dueDay",1,31),notes:optional(fd,"notes")};
+    // An end date and a card are optional. Clearing either field on an edit removes it.
+    const endsOn=optionalDate(fd,"endsOn");
+    if(endsOn&&(endsOn.getUTCFullYear()<2000||endsOn.getUTCFullYear()>2100))throw new Error("Informe uma data de término válida.");
+    const cardAccountId=text(fd,"cardAccountId");
+    if(cardAccountId){const card=await accountRef(ctx.workspaceId,cardAccountId);if(card?.type!=="CREDIT_CARD")throw new Error("Escolha um cartão de crédito para ligar o gasto à fatura.");}
+    const data={name:name(fd),amountCents:cents(fd,"amount"),dueDay:integer(fd,"dueDay",1,31),notes:optional(fd,"notes"),endsOn,cardAccountId:cardAccountId||null};
     await prisma.$transaction(async tx=>{
       if(id){const result=await tx.fixedExpense.updateMany({where:{id,workspaceId:ctx.workspaceId,isActive:true},data});if(!result.count)throw new Error("Gasto fixo não encontrado.");}
       else{const item=await tx.fixedExpense.create({data:{workspaceId:ctx.workspaceId,...data}});await log(tx,ctx,"expense.plan_created","FixedExpense",item.id);}
@@ -210,7 +216,7 @@ export async function saveTransaction(fd: FormData) {
     const category = type === "TRANSFER" ? null : await categoryRef(ctx.workspaceId, text(fd, "categoryId"));
     const installmentNumber = integer(fd, "installmentNumber", 1, 999), installmentTotal = integer(fd, "installmentTotal", 1, 999);
     if (Boolean(installmentNumber) !== Boolean(installmentTotal) || (installmentNumber && installmentTotal && installmentNumber > installmentTotal)) throw new Error("Confira número e total de parcelas.");
-    const data = { accountId: account.id, destinationAccountId: destination?.id || null, categoryId: category?.id || null, type, description: name(fd, "description"), merchant: optional(fd, "merchant", 200), amountCents: cents(fd, "amount", type === "ADJUSTMENT", type === "ADJUSTMENT"), currency: "BRL", date: date(fd, "date"), competenceDate: optionalDate(fd, "competenceDate"), installmentNumber, installmentTotal, notes: optional(fd, "notes", 2000), tags: text(fd, "tags").split(",").map(t => t.trim()).filter(Boolean).slice(0, 20).map(t => z.string().max(50).parse(t)), recurring: fd.get("recurring") === "on" };
+    const data = { accountId: account.id, destinationAccountId: destination?.id || null, categoryId: category?.id || null, type, description: name(fd, "description"), merchant: optional(fd, "merchant", 200), amountCents: cents(fd, "amount", type === "ADJUSTMENT", type === "ADJUSTMENT"), currency: "BRL", date: date(fd, "date"), competenceDate: optionalDate(fd, "competenceDate"), installmentNumber, installmentTotal, notes: normalizeNote(z.string().max(NOTE_MAX).parse(text(fd, "notes"))), tags: text(fd, "tags").split(",").map(t => t.trim()).filter(Boolean).slice(0, 20).map(t => z.string().max(50).parse(t)), recurring: fd.get("recurring") === "on" };
     await prisma.$transaction(async tx => {
       const id = text(fd, "id");
       if (id) {
@@ -559,6 +565,7 @@ export async function saveCardExpense(fd: FormData) {
     const description = name(fd, "description");
     const purchaseDate = date(fd, "date");
     const merchant = optional(fd, "merchant", 200);
+    const notes = normalizeNote(z.string().max(NOTE_MAX).parse(text(fd, "notes")));
     const category = await categoryRef(ctx.workspaceId, text(fd, "categoryId"));
     const installments = integer(fd, "installments", 1, 24) ?? 1;
     if (amountCents < installments) throw new Error("Cada parcela precisa ter pelo menos um centavo.");
@@ -579,7 +586,7 @@ export async function saveCardExpense(fd: FormData) {
         const partDescription = installments > 1 ? `${description} (${part.number}/${installments})` : description;
         const day = part.date.toISOString().slice(0, 10);
         const row = await tx.financeTransaction.create({ data: {
-          workspaceId: ctx.workspaceId, accountId: card.id, categoryId: category?.id || null, type: "EXPENSE", description: partDescription, merchant,
+          workspaceId: ctx.workspaceId, accountId: card.id, categoryId: category?.id || null, type: "EXPENSE", description: partDescription, merchant, notes,
           amountCents: part.amountCents, currency: "BRL", date: part.date, installmentNumber: installments > 1 ? part.number : null, installmentTotal: installments > 1 ? installments : null,
           source: "CARD_QUICK_ADD", fingerprint: transactionFingerprint(ctx.workspaceId, card.id, { date: day, description: partDescription, amountCents: part.amountCents, type: "EXPENSE", externalId: null }),
           ...(statement && part.number === 1 && link !== "NONE" ? { cardStatementId: statement.id, statementDetailMode: link } : {}),
@@ -649,6 +656,7 @@ const gridTransactionSchema = z.object({
   type: z.enum(["INCOME", "EXPENSE", "REFUND", "ADJUSTMENT"]),
   amount: z.string().min(1),
   tags: z.string().max(1000).optional(),
+  notes: z.string().max(NOTE_MAX).optional(),
 });
 export type GridTransactionInput = z.input<typeof gridTransactionSchema>;
 
@@ -675,6 +683,8 @@ export async function saveGridTransactions(input: GridTransactionInput[]) {
       type: row.type,
       amountCents: Math.abs(parseMoney(row.amount, row.type === "ADJUSTMENT")),
       tags: [...new Set((row.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean))].slice(0, 20),
+      // undefined leaves a stored note untouched; an empty string clears it. Notes never reach the fingerprint.
+      notes: row.notes === undefined ? undefined : normalizeNote(row.notes),
       source: "PASTE",
       currency: "BRL",
     }));
@@ -710,6 +720,7 @@ const editableCellSchema = z.discriminatedUnion("field", [
   z.object({ field: z.literal("accountId"), value: z.string().min(1), id: z.string() }),
   z.object({ field: z.literal("type"), value: z.enum(["INCOME", "EXPENSE", "REFUND", "ADJUSTMENT"]), id: z.string() }),
   z.object({ field: z.literal("tags"), value: z.string().max(1000), id: z.string() }),
+  z.object({ field: z.literal("notes"), value: z.string().max(NOTE_MAX), id: z.string() }),
 ]);
 
 /** Saves one committed cell, never on each keypress. */
@@ -727,6 +738,7 @@ export async function updateTransactionCell(input: z.input<typeof editableCellSc
       case "merchant": data = { merchant: change.value || null }; break;
       case "amount": data = { amountCents: Math.abs(parseMoney(change.value, current.type === "ADJUSTMENT")) }; break;
       case "type": data = { type: change.value }; break;
+      case "notes": data = { notes: normalizeNote(change.value) }; break;
       case "tags": data = { tags: [...new Set(change.value.split(",").map((tag) => tag.trim()).filter(Boolean))].slice(0, 20) }; break;
       case "categoryId": {
         if (change.value) await categoryRef(ctx.workspaceId, change.value);

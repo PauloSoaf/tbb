@@ -2,7 +2,10 @@ import { Prisma } from "@prisma/client";
 import { addDays, dateKeyToUTC, startOfMonth } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
 import { summarizeCardStatements, type StatementRow } from "./card-statements";
-import { calculateFixedExpenses, fixedExpenseKey } from "./fixed-expenses";
+import { calculateFixedExpenses, fixedExpenseItems, fixedExpenseKey, plannedActiveIn } from "./fixed-expenses";
+import { buildSalaryAllocation } from "./salary-allocation";
+import { statementCoverage } from "./credit-limit";
+import { billsForMonth, fixedBillCoverage, monthKeys, variableOutsideStatements, type SalaryPlanView } from "./salary-plan";
 import { cardStatementRows, creditCardPositions, type StatementViewer } from "./queries";
 import { isUnassignedAccount } from "./unassigned-account";
 import { groupBankAccounts, invoiceFunding } from "./bank-accounts";
@@ -74,7 +77,7 @@ export async function financeOverview(workspaceId: string, today: string, option
     investmentMaturities,
     statementRows,
     plan,
-    plannedFixed,
+    plannedFixedRows,
     personalAssets,
   ] = await Promise.all([
     prisma.account.findMany({
@@ -122,7 +125,7 @@ export async function financeOverview(workspaceId: string, today: string, option
     }),
     prisma.financeTransaction.findMany({
       where: { workspaceId, type: "EXPENSE", isConsumption: true, date: currentRange },
-      select: { amountCents: true, description: true, merchant: true, recurring: true, subscriptionId: true },
+      select: { amountCents: true, description: true, merchant: true, recurring: true, subscriptionId: true, accountId: true, date: true, cardStatementId: true },
     }),
     prisma.subscription.findMany({
       where: { workspaceId, status: "ACTIVE" },
@@ -192,6 +195,12 @@ export async function financeOverview(workspaceId: string, today: string, option
 
   const currentKey = today.slice(0, 7);
   const previousKey = previousStart.toISOString().slice(0, 7);
+  // Every active plan with its end date as a day. The ones whose last month has passed no longer count anywhere.
+  const dayText = (value: Date | null) => (value ? value.toISOString().slice(0, 10) : null);
+  const plannedAll = plannedFixedRows.map((row) => ({ ...row, endsOn: dayText(row.endsOn) }));
+  const plannedFixed = plannedActiveIn(plannedAll, currentKey);
+  const cardIds = new Set(accounts.filter((account) => account.type === "CREDIT_CARD").map((account) => account.id));
+  const toPlanned = (rows: typeof plannedAll) => rows.map((row) => ({ id: row.id, name: row.name, amountCents: row.amountCents, cardId: row.cardAccountId }));
   const totalsFor = (key: string) => {
     let incomeCents = 0;
     let expensesCents = 0;
@@ -222,6 +231,47 @@ export async function financeOverview(workspaceId: string, today: string, option
   const fixed = calculateFixedExpenses(postedFixed, subscriptions, plannedFixed);
   const incomeReferenceCents = plan ? plan.incomeCents : monthlyIncome?.amountCents || 0;
   const fixedPaidCents = Math.min(current.expensesCents, fixed.postedCents);
+  // The salary map uses the very same universe as the "Fixos" and "Uso da renda" figures, itemised.
+  const currentItems = fixedExpenseItems(postedFixed, subscriptions, toPlanned(plannedFixed), { cardIds });
+  const salary = buildSalaryAllocation({ incomeCents: incomeReferenceCents, items: currentItems, variableCents: Math.max(0, current.expensesCents - fixedPaidCents) });
+  const coveredNames = new Set(fixedNames);
+  // Minimum payments of debts are not part of the usage figure; listed apart so nothing is counted twice.
+  const debtMinimumsCents = debts.filter((debt) => !coveredNames.has(fixedExpenseKey(debt.name))).reduce((sum, debt) => sum + Math.max(0, debt.minimumPaymentCents), 0);
+
+  // The plan for this month and the next five. Card purchases reach it through their bill, so the variable slice
+  // leaves out what a registered statement already holds. Later months have no variable spending yet; they carry
+  // the plan's fixed expenses, the active subscriptions and the recurring postings of this month.
+  const postedFixedSet = new Set(postedFixed);
+  const cardCoverage = new Map(positions.map((card) => [card.id, { hasStatements: Boolean(card.totals), coverage: statementCoverage(card.statements) }]));
+  const variableOutsideBillsCents = variableOutsideStatements({
+    cards: cardCoverage,
+    expenses: recurringExpenses.map((row) => ({ amountCents: row.amountCents, accountId: row.accountId, date: row.date.toISOString().slice(0, 10), cardStatementId: row.cardStatementId, isFixed: postedFixedSet.has(row) })),
+  });
+  const recurringCarry = postedFixed.filter((row) => row.recurring);
+  const billPurchases = statementViewer?.role === "OWNER" ? await prisma.financeTransaction.findMany({
+    where: { workspaceId, type: "EXPENSE", cardStatementId: { in: statementRows.map(row => row.id) } },
+    select: { id: true, accountId: true, cardStatementId: true, amountCents: true, description: true, merchant: true, subscriptionId: true },
+  }) : [];
+  const salaryPlan: SalaryPlanView = {
+    canSeeBills: statementViewer?.role === "OWNER",
+    excludedDebtMinimumsCents: debtMinimumsCents,
+    openBillsCents: statementRows.filter(row => row.kind === "STATEMENT" && row.status === "OPEN" && !row.rolledIntoStatementId).reduce((sum, row) => sum + row.amountCents, 0),
+    openBillsCount: statementRows.filter(row => row.kind === "STATEMENT" && row.status === "OPEN" && !row.rolledIntoStatementId).length,
+    undatedBillsCount: statementRows.filter(row => row.kind === "STATEMENT" && row.status === "FUTURE_KNOWN" && !row.rolledIntoStatementId && !row.dueDate).length,
+    months: monthKeys(today).map((month, index) => {
+      const planned = plannedActiveIn(plannedAll, month);
+      const plannedNames = new Set(planned.map((row) => fixedExpenseKey(row.name)));
+      const carried = recurringCarry.filter((row) => ![fixedExpenseKey(row.description), fixedExpenseKey(row.merchant)].some((name) => name && plannedNames.has(name)));
+      const bills = statementViewer ? billsForMonth(statementRows, month, today) : [];
+      const items = index === 0 ? currentItems : fixedExpenseItems(carried, subscriptions, toPlanned(planned), { cardIds });
+      return {
+        month, incomeCents: incomeReferenceCents,
+        items: fixedBillCoverage(items, bills, billPurchases),
+        bills,
+        variableCents: index === 0 ? variableOutsideBillsCents : 0, variablesKnown: index === 0,
+      };
+    }),
+  };
   // Same limit rule as the accounts and statements screens: one breakdown per card.
   const creditCards = positions.map((card) => {
     const due = nextDueDate(today, card.dueDay);
@@ -302,7 +352,7 @@ export async function financeOverview(workspaceId: string, today: string, option
     accounts: accountRows.map(({ id, name, institution, type, balanceCents, unassigned }) => ({ id, name, institution, type, balanceCents, unassigned })),
     banks: groupBankAccounts(accountRows).map(({ id, name, institution, cashCents, reserveCents, hasCash, accounts: products }) => ({ id, name, institution, cashCents, reserveCents, hasCash, cardCount: products.filter((account) => account.type === "CREDIT_CARD").length })),
     funding: statementViewer?.role === "OWNER" ? funding : null,
-    plannedFixed: plannedFixed.map(({id,name,amountCents,dueDay,notes})=>({id,name,amountCents,dueDay,notes})),
+    plannedFixed: plannedAll.map(({id,name,amountCents,dueDay,notes,endsOn,cardAccountId})=>({id,name,amountCents,dueDay,notes,endsOn,cardAccountId})),
     personalAssets,
     creditCards,
     cardStatements: {
@@ -316,5 +366,7 @@ export async function financeOverview(workspaceId: string, today: string, option
     recent: recent.map((item) => ({ id: item.id, type: item.type, description: item.description, merchant: item.merchant, amountCents: item.amountCents, date: item.date.toISOString().slice(0, 10), source: item.source, account: item.account.name, category: item.category?.name || "Sem categoria" })),
     budgets: budgets.map((item) => ({ id: item.id, category: item.category, limitCents: item.limitCents, spentCents: Number(item.spentCents), usage: item.limitCents ? Math.round(Number(item.spentCents) / item.limitCents * 100) : 0 })),
     fixedDetails: fixed,
+    salary: { ...salary, excludedDebtMinimumsCents: debtMinimumsCents },
+    salaryPlan,
   };
 }

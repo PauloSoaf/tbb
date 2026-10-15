@@ -1,3 +1,5 @@
+import { newDraftId } from "./grid-order";
+
 export type ClipboardTable = { delimiter: "\t" | "," | ";"; rows: string[][]; hasHeader: boolean };
 
 function firstRecordCounts(input: string) {
@@ -45,8 +47,8 @@ export function parseClipboardTable(input: string): ClipboardTable {
 
 export function clipboardDrafts(input:string,today:string,accountId:string){
   const parsed=parseClipboardTable(input);const data=parsed.hasHeader?parsed.rows.slice(1):parsed.rows;
-  return data.map((row,index)=>{
+  return data.map(row=>{
     const [date,description,amount]=row.length>=3?row:[today,row[0]||"",row[1]||""];
-    return {id:`draft-${Date.now()}-${index}`,date:date||today,description:description||"",merchant:"",categoryId:"",accountId,type:(amount||"").trim().startsWith("-")?"EXPENSE" as const:"EXPENSE" as const,amount:(amount||"").replace(/^[-+]/,""),tags:"",draft:true};
+    return {id:newDraftId(),date:date||today,description:description||"",merchant:"",categoryId:"",accountId,type:(amount||"").trim().startsWith("-")?"EXPENSE" as const:"EXPENSE" as const,amount:(amount||"").replace(/^[-+]/,""),tags:"",draft:true};
   });
 }

@@ -5,6 +5,7 @@ import { ArrowLeft, Check, CheckCircle2, CreditCard, Delete, Loader2, Plus, Rece
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { displayCalculatorValue } from "./calculator-engine";
+import { useLocalStorageString } from "@/lib/use-local-storage-string";
 
 type UtilityMode="expense"|"income"|"monthly-income"|"card"|"check"|"save";
 type Account={id:string;name:string;institution:string|null;type:string};
@@ -41,16 +42,14 @@ export function CalculatorUtilities({workspaceId,value,expression,onRecall}:{wor
   const [accountId,setAccountId]=useState("");
   const [categoryId,setCategoryId]=useState("");
   const [label,setLabel]=useState("");
-  const [saved,setSaved]=useState<SavedCalculation[]>([]);
-  const [savedReady,setSavedReady]=useState(false);
   const storageKey=`tbb-calculator-saved-${workspaceId}`;
+  const [storedCalculations,setStoredCalculations]=useLocalStorageString(storageKey,"[]");
+  const saved=useMemo<SavedCalculation[]>(()=>{
+    try{const parsed=JSON.parse(storedCalculations);return Array.isArray(parsed)?parsed.slice(0,30):[]}catch{return []}
+  },[storedCalculations]);
+  function setSaved(update:(current:SavedCalculation[])=>SavedCalculation[]){setStoredCalculations(JSON.stringify(update(saved).slice(0,30)))}
   const usableValue=value!==null&&Number.isFinite(value)&&Math.abs(value)>0;
 
-  useEffect(()=>{
-    try{const stored=localStorage.getItem(storageKey);if(stored)setSaved(JSON.parse(stored).slice(0,30))}catch{}
-    setSavedReady(true);
-  },[storageKey]);
-  useEffect(()=>{if(savedReady)localStorage.setItem(storageKey,JSON.stringify(saved.slice(0,30)))},[saved,savedReady,storageKey]);
   useEffect(()=>{
     if(!open||metadata||metadataRequestRef.current)return;
     let active=true;
@@ -84,7 +83,6 @@ export function CalculatorUtilities({workspaceId,value,expression,onRecall}:{wor
     setDescription(next==="expense"?"Despesa":next==="income"?"Receita":next==="card"?"Compra no cartão":"");
     if(next==="save"&&!label)setLabel(`Cálculo ${new Date().toLocaleDateString("pt-BR")}`);
   }
-  function close(){setOpen(false);setMode(null);setReviewing(false)}
   function saveCalculation(){
     if(!usableValue)return;
     const cleanLabel=label.trim();

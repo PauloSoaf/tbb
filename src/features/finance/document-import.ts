@@ -77,8 +77,8 @@ export async function previewFinancialEvidence(db: DB, actor: ImportActor, sourc
       const payment = payments.find(p => p.fingerprint === fingerprint || p.id === e.paymentId);
       if (payment) Object.assign(match, { action: payment.amountCents === candidate.amountCents ? "KEEP" : "CONFLICT", reason: "Pagamento já registrado nesta origem." });
       else {
-        const probable = payments.filter(p => p.accountId === source.accountId && p.amountCents === candidate.amountCents && candidate.effectiveDate && Math.abs(p.date.valueOf() - Date.parse(candidate.effectiveDate)) <= 3 * 86400000);
-        if (probable.length) Object.assign(match, { action: "AMBIGUOUS", reason: "Possível pagamento existente. Vincule a evidência para não deduzir duas vezes.", matches: probable.map(p => ({ ...p, description: "Pagamento da fatura", date: day(p.date), revision: 0 })) });
+        const probable = payments.filter(p => p.accountId === source.accountId && p.amountCents === candidate.amountCents && candidate.effectiveDate && (!p.date || Math.abs(p.date.valueOf() - Date.parse(candidate.effectiveDate)) <= 3 * 86400000)); // a manual payment with no known day may be this very payment
+        if (probable.length) Object.assign(match, { action: "AMBIGUOUS", reason: "Possível pagamento existente. Vincule a evidência para não deduzir duas vezes.", matches: probable.map(p => ({ ...p, description: "Pagamento da fatura", date: p.date ? day(p.date) : "Data não informada", revision: 0 })) });
       }
     }
     return { id: e.id, version: e.version, sourceId: e.sourceId, fileName: source.fileName, candidate, ...match, matches: match.matches.map(t => ({ id: t.id, description: t.description, date: t.date, revision: t.revision })) };

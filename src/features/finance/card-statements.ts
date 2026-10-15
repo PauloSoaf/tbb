@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { CardStatementKind, CardStatementReconciliation, CardStatementStatus } from "@prisma/client";
 import { addDays, dateKeyToUTC, formatDay, isDateKey } from "@/lib/dates";
 import { money } from "./money";
+import type { StatementProvenance } from "./statement-provenance";
 
 /** Card statements are aggregates kept beside the ledger: importing them never creates
  * FinanceTransaction rows. Amounts are integer cents and null always means "not provided". */
@@ -359,6 +360,10 @@ export type StatementRow = {
   /** `amountCents` is the bill total: the declared amount plus expenses added on top of it. */
   version?: string; declaredCents?: number; addedCents?: number; detailedCents?: number; detailCount?: number;
   paidCents?: number; rolledIntoStatementId?: string | null; amountIsOutstanding?: boolean;
+  /** Payments registered on the bill; a payment without a date keeps `date` null. */
+  payments?: { amountCents: number; date: string | null }[];
+  /** Where the numbers come from and when; see statement-provenance.ts. */
+  provenance?: StatementProvenance;
 };
 export type CardTotals = {
   accountName: string; openCents: number; openCount: number; overdue: boolean; nextDueDate: string | null; closingDate: string | null; closingDay: number | null;

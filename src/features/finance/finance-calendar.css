@@ -62,3 +62,5 @@
 .finance-cal-aggregate-hint{margin-top:9px;color:var(--muted-foreground);font-size:.68rem;line-height:1.5}
 .finance-cal-aggregate-hint a{color:var(--primary);text-decoration:underline;text-underline-offset:2px}
 .finance-cal-icon-button:disabled{opacity:.45;cursor:default;transform:none}
+
+.finance-cal-note{display:block;color:var(--muted-foreground);font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

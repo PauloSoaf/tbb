@@ -12,7 +12,6 @@ export function GridSelect({label,value,options,onValueChange,triggerClassName="
   const triggerRef=useRef<HTMLButtonElement>(null);
   const searchRef=useRef<HTMLInputElement>(null);
   const optionRefs=useRef<Array<HTMLButtonElement|null>>([]);
-  const [mounted,setMounted]=useState(false);
   const [open,setOpen]=useState(false);
   const [query,setQuery]=useState("");
   const [position,setPosition]=useState<MenuPosition>({left:8,top:8,width:190,maxHeight:260,placement:"bottom"});
@@ -23,8 +22,6 @@ export function GridSelect({label,value,options,onValueChange,triggerClassName="
     const normalized=query.trim().toLocaleLowerCase("pt-BR");
     return normalized?options.filter(option=>option.label.toLocaleLowerCase("pt-BR").includes(normalized)):options;
   },[options,query]);
-
-  useEffect(()=>setMounted(true),[]);
 
   function placeMenu(){
     const trigger=triggerRef.current;
@@ -91,7 +88,7 @@ export function GridSelect({label,value,options,onValueChange,triggerClassName="
     else if(event.key==="Escape"){event.preventDefault();hide(true)}
   }
 
-  const popup=mounted&&open?createPortal(
+  const popup=open?createPortal(
     <div id={`${id}-popup`} className="grid-select-popover" data-placement={position.placement} role="presentation" style={{left:position.left,top:position.top,width:position.width,maxHeight:position.maxHeight}}>
       <header><span>{label}</span><button type="button" onClick={()=>hide(true)} aria-label={`Fechar ${label}`}><X size={13}/></button></header>
       {searchable&&<label className="grid-select-search"><Search size={13}/><input ref={searchRef} value={query} onChange={event=>setQuery(event.target.value)} onKeyDown={event=>{event.stopPropagation();if(event.key==="Escape"){event.preventDefault();hide(true)}else if(event.key==="ArrowDown"&&visibleOptions.length){event.preventDefault();optionRefs.current[0]?.focus()}}} placeholder={`Buscar ${label.toLocaleLowerCase("pt-BR")}`} aria-label={`Buscar em ${label}`}/>{query&&<button type="button" onClick={()=>{setQuery("");searchRef.current?.focus()}} aria-label="Limpar busca"><X size={12}/></button>}</label>}

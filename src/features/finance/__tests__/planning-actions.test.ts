@@ -48,6 +48,25 @@ describe('fixed expense planning',()=>{
     await archiveFixedExpense(form({id:'fixed',workspaceId:'attacker'}));
     expect(mocks.fixedUpdate.mock.calls.every(([args])=>args.where.workspaceId==='synthetic')).toBe(true);
   });
+  it('keeps an optional end date and the card the expense is charged to, and clears them when left blank',async()=>{
+    mocks.account.mockResolvedValue({id:'card',type:'CREDIT_CARD'});
+    expect(await saveFixedExpense(form({name:'Resort sintético',amount:'550',dueDay:'2',endsOn:'2032-12-02',cardAccountId:'card'}))).toHaveProperty('success');
+    expect(mocks.fixed.mock.calls[0][0].data).toMatchObject({endsOn:new Date('2032-12-02T00:00:00.000Z'),cardAccountId:'card'});
+    expect(mocks.account.mock.calls[0][0].where).toMatchObject({id:'card',workspaceId:'synthetic'});
+    await saveFixedExpense(form({id:'fixed',name:'Resort sintético',amount:'550',endsOn:'',cardAccountId:''}));
+    expect(mocks.fixedUpdate.mock.calls[0][0].data).toMatchObject({endsOn:null,cardAccountId:null});
+    await saveFixedExpense(form({name:'Sem fim',amount:'10'}));
+    expect(mocks.fixed.mock.calls[1][0].data).toMatchObject({endsOn:null,cardAccountId:null});
+  });
+  it('only links a credit card of this workspace, and refuses a bad end date before writing anything',async()=>{
+    mocks.account.mockResolvedValue({id:'bank',type:'CHECKING'});
+    expect(await saveFixedExpense(form({name:'Synthetic',amount:'10',cardAccountId:'bank'}))).toHaveProperty('error');
+    mocks.account.mockResolvedValue(null);
+    expect(await saveFixedExpense(form({name:'Synthetic',amount:'10',cardAccountId:'someone-elses'}))).toHaveProperty('error');
+    mocks.account.mockResolvedValue({id:'card',type:'CREDIT_CARD'});
+    for(const endsOn of ['32/13/2032','abc','1999-12-31','2101-01-01'])expect(await saveFixedExpense(form({name:'Synthetic',amount:'10',endsOn,cardAccountId:'card'})),endsOn).toHaveProperty('error');
+    expect(mocks.fixed).not.toHaveBeenCalled();expect(mocks.transaction).not.toHaveBeenCalled();
+  });
   it('rejects invalid payment days and missing expenses',async()=>{
     expect(await saveFixedExpense(form({name:'Synthetic',amount:'10',dueDay:'32'}))).toHaveProperty('error');expect(mocks.fixed).not.toHaveBeenCalled();
     mocks.fixedUpdate.mockResolvedValue({count:0});expect(await archiveFixedExpense(form({id:'foreign'}))).toHaveProperty('error');

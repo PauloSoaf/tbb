@@ -2,6 +2,8 @@ import { getWorkspaceContext, getActivePartnerConnection } from "@/lib/workspace
 import { prisma } from "@/lib/prisma";
 import { AppShell } from "@/components/layout/AppShell";
 import { FloatingActionDock } from "@/components/floating-assistant/FloatingActionDock";
+import { cookies } from "next/headers";
+import { FinancePrivacyProvider } from "@/features/finance/FinancePrivacy";
 
 export default async function ApplicationLayout({ children }: { children: React.ReactNode }) {
   const context = await getWorkspaceContext();
@@ -20,7 +22,8 @@ export default async function ApplicationLayout({ children }: { children: React.
     const partnerWorkspace = await prisma.workspace.findUnique({ where: { id: partnerWorkspaceId }, select: { name: true } });
     partnerName = partnerWorkspace?.name ?? null;
   }
-  return <AppShell workspaceName={context.workspace.name} userName={context.user.name} isAdmin={context.user.isGlobalAdmin} notifications={notifications} partnerName={partnerName}>
+  const privacyEnabled = (await cookies()).get("tbb-finance-privacy")?.value === "1";
+  return <FinancePrivacyProvider initialEnabled={privacyEnabled}><AppShell workspaceName={context.workspace.name} userName={context.user.name} isAdmin={context.user.isGlobalAdmin} notifications={notifications} partnerName={partnerName}>
     {children}<FloatingActionDock workspaceId={context.workspaceId}/>
-  </AppShell>;
+  </AppShell></FinancePrivacyProvider>;
 }
