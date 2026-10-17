@@ -2,9 +2,11 @@ import type { StatementRow } from "./card-statements";
 import type { FinanceOverviewData } from "./overview-query";
 import { money } from "./money";
 import { personalAssetCopy } from "./personal-asset-copy";
+import type { FinancialPlanningData } from "./planning/query";
 
 type LedgerRow={date:string;description:string;type:string;amountCents:number;account:string;destination:string|null;category:string|null;source:string;statementDetailMode:string|null;installmentNumber:number|null;installmentTotal:number|null;recurring:boolean;merchant:string|null;notes:string|null;postedDate?:string|null;purchasedDate?:string|null;occurredAt?:string|null;occurredTimezone?:string|null;eventKind?:string;isConsumption?:boolean;originalCurrency?:string|null;originalAmountCents?:number|null;exchangeRate?:string|null};
 type ReportRows={
+  planning?: Pick<FinancialPlanningData, "forecast" | "limits">;
   statements:StatementRow[];
   transactions:LedgerRow[];
   debts:{name:string;status:string;remainingBalanceCents:number;originalAmountCents:number;minimumPaymentCents:number;dueDay:number|null;interestBasisPoints:number;ratePeriod:string;targetPayoffDate:string|null}[];
@@ -39,6 +41,13 @@ export function buildFinancialReport(data:FinanceOverviewData,rows:ReportRows){
     table(['Mês de vencimento','Faturas conhecidas','Acumulado','Falta acumulada com caixa de hoje'],funding?.timeline.map((p)=>[p.month,money(p.amountCents),money(p.cumulativeCents),funding.hasCash?money(p.shortfallCents):'Desconhecida'])||[]),
     "## Gastos fixos previstos",
     table(['Gasto','Valor mensal','Dia previsto','Termina em','Cobrado no cartão','Observações'],data.plannedFixed.map((f)=>[f.name,money(f.amountCents),f.dueDay,f.endsOn??'Sem data de término',data.creditCards.find((card)=>card.id===f.cardAccountId)?.name??(f.cardAccountId?'Cartão arquivado':'Não'),f.notes])),
+    "### Detalhes do planejamento dos fixos",
+    table(['Gasto','Começa em','Forma de pagamento','Conta de origem','Confirmação','Margem','Faixa estimada'],data.plannedFixed.map(f=>[f.name,f.startsOn,f.paymentMethod,data.accounts.find(account=>account.id===f.paymentAccountId)?.name,f.confirmationStatus,money(f.safetyMarginCents??0),`${f.expectedMinCents==null?'Não informado':money(f.expectedMinCents)} – ${f.expectedMaxCents==null?'Não informado':money(f.expectedMaxCents)}`])),
+    "## Previsões financeiras mensais",
+    "Planejamento, sem gerar lançamentos. A renda prevista é o total esperado; recebimentos aparecem à parte. Reservas já financiadas são liberadas no mês da obrigação, sem descontá-las duas vezes.",
+    table(['Mês','Renda prevista','Recebido','Faturas integrais','Fixos fora das faturas','Variáveis de caixa','Variáveis previstas','Outras saídas','Novas reservas','Sobra livre','Pendências'],(rows.planning?.forecast??[]).map(f=>[f.month,f.incomeCents===null?'Não informado':money(f.incomeCents),money(f.receivedCents),money(f.billsCents),money(f.fixedOutsideBillsCents),money(f.variableCashCents),money(f.variablePlannedCents),money(f.otherOutflowCents),money(f.reservesCents),f.surplusCents===null?'Projeção incompleta':money(f.surplusCents),f.issues.join('; ')])),
+    "## Limites de gastos variáveis",
+    table(['Limite','Início','Fim inclusive','Teto','Utilizado','Agendado','Restante','Estado','A classificar'],(rows.planning?.limits??[]).map(limit=>[limit.name,limit.usage.start,limit.usage.end,money(limit.limitCents),money(limit.usage.usedNowCents),money(limit.usage.scheduledCents),money(limit.usage.remainingCents),limit.usage.risk,limit.usage.pendingReviewCount])),
     "## Assinaturas e compromissos recorrentes",
     table(['Nome','Status','Valor por ciclo','Ciclo','Próxima cobrança','Conta','Plano original'],rows.subscriptions.map((s)=>[s.name,s.status,`${money(s.amountCents)}${s.amountIsEstimate?' (estimado)':''}`,s.billingCycle,`${s.nextChargeDate}${s.nextChargeIsEstimate?' (estimada)':''}`,s.account,s.originalCurrency&&s.originalAmountCents?money(s.originalAmountCents,s.originalCurrency):'BRL'])),
     "## Dívidas efetivas",

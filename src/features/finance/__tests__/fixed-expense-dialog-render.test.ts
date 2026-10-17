@@ -22,7 +22,7 @@ describe("the fixed expense form", () => {
     const html = render([], [{ id: "c1", name: "Cartão A" }, { id: "c2", name: "Cartão B" }]);
     expect(html).toContain("Cobrado no cartão (opcional)");
     expect(html).toMatch(/<select name="cardAccountId"[^>]*><option value="" selected="">Não é no cartão<\/option><option value="c1">Cartão A<\/option><option value="c2">Cartão B<\/option>/);
-    expect(html).toContain("em vez de ser contado duas vezes");
+    expect(html).toContain("A fatura mant\u00e9m seu valor integral");
   });
   it("shows no card question when there is no credit card to choose from", () => {
     expect(render([], [])).not.toContain("cardAccountId");

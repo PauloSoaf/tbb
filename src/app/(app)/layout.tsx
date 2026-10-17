@@ -4,6 +4,8 @@ import { AppShell } from "@/components/layout/AppShell";
 import { FloatingActionDock } from "@/components/floating-assistant/FloatingActionDock";
 import { cookies } from "next/headers";
 import { FinancePrivacyProvider } from "@/features/finance/FinancePrivacy";
+import { FinanceWriteProvider } from "@/features/finance/FinanceWriteAccess";
+import { AuthorizationError, requirePermission } from "@/lib/tenancy/requirePermission";
 
 export default async function ApplicationLayout({ children }: { children: React.ReactNode }) {
   const context = await getWorkspaceContext();
@@ -23,7 +25,9 @@ export default async function ApplicationLayout({ children }: { children: React.
     partnerName = partnerWorkspace?.name ?? null;
   }
   const privacyEnabled = (await cookies()).get("tbb-finance-privacy")?.value === "1";
+  let canWrite = context.role === "OWNER";
+  if (!canWrite) { try { await requirePermission("WRITE"); canWrite = true; } catch (error) { if (!(error instanceof AuthorizationError)) throw error; } }
   return <FinancePrivacyProvider initialEnabled={privacyEnabled}><AppShell workspaceName={context.workspace.name} userName={context.user.name} isAdmin={context.user.isGlobalAdmin} notifications={notifications} partnerName={partnerName}>
-    {children}<FloatingActionDock workspaceId={context.workspaceId}/>
+    {children}<FinanceWriteProvider canWrite={canWrite}><FloatingActionDock workspaceId={context.workspaceId}/></FinanceWriteProvider>
   </AppShell></FinancePrivacyProvider>;
 }

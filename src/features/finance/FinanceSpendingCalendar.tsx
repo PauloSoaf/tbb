@@ -1,5 +1,7 @@
 "use client";
 
+import { FinanceWriteOnly } from "@/features/finance/FinanceWriteAccess";
+
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -17,6 +19,8 @@ import { calendarDayTotals, calendarStatementDues, calendarMonthDays, calendarMo
 import { formatDay, isDateKey } from "@/lib/dates";
 import { notePreview } from "./transaction-notes";
 import "./finance-calendar.css";
+import { usePlanningCopy } from "./planning/copy";
+import type { PlanningMarker } from "./planning/calendar-markers";
 
 type QuickForm = { type: "EXPENSE" | "INCOME"; description: string; amount: string; date: string; accountId: string; categoryId: string };
 const emptyForm = (day: string, type: QuickForm["type"]): QuickForm => ({ type, description: "", amount: "", date: day, accountId: "", categoryId: "" });
@@ -34,6 +38,10 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
 }) {
   const router = useRouter();
   const { locale } = useI18n();
+  const planning = usePlanningCopy();
+  const [showPlanning, setShowPlanning] = useState(false), [markers, setMarkers] = useState<PlanningMarker[]>([]);
+  const [markerKinds, setMarkerKinds] = useState(["limits","goals","plan"]);
+  const activeMarkers = markers.filter(marker=>markerKinds.includes(marker.kind));
   const reduceMotion = useReducedMotion();
   const copy = calendarCopy[locale];
   const lang = calendarLocale[locale];
@@ -44,6 +52,15 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
   const [compactSelection, setCompactSelection] = useState(() => calendarSelection(initialMonth.month, initialDay, today));
   const view = compact ? compactSelection : calendarSelection(searchParams.get("month"), searchParams.get("day"), today);
   const { month, day: selected } = view;
+  useEffect(() => {
+    if (!showPlanning || !canManageCards) return;
+    const controller = new AbortController();
+    fetch(`/api/finance/planning-markers?month=${month}`, { signal: controller.signal, cache: "no-store" }).then(async response => {
+      if (!response.ok) throw new Error("planning markers");
+      const data = await response.json() as { markers: PlanningMarker[] }; setMarkers(data.markers);
+    }).catch(error => { if (error.name !== "AbortError") setMarkers([]); });
+    return () => controller.abort();
+  }, [showPlanning, canManageCards, month, initialMonth]);
   const [direction, setDirection] = useState(1);
   const [months, setMonths] = useState<CalendarCache>({});
 
@@ -183,6 +200,7 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
     <header className="finance-cal-header">
       <div className="finance-cal-heading"><span className="finance-cal-brand"><CalendarDays size={18}/></span><div>{!compact && <span className="finance-cal-eyebrow">{copy.daily}</span>}<h2>{compact ? copy.compactTitle : copy.title}</h2>{!compact && <p>{copy.hint}</p>}</div>{compact && <Link className="finance-cal-full-link" href={`/finance/calendar?month=${month}&day=${selected}`}>{copy.full} <ArrowRight size={14}/></Link>}</div>
       <div className="finance-cal-actions">
+        {canManageCards && <AppTooltip content={`${planning("plan")} · ${planning("limits")} · ${planning("goals")}`}><button type="button" className="finance-cal-icon-button" aria-label={planning("plan")} aria-pressed={showPlanning} onClick={() => setShowPlanning(value => !value)}><CalendarDays size={15}/></button></AppTooltip>}
         <button type="button" className="finance-cal-icon-button" onClick={() => moveBy(-1)} aria-label={copy.previous} disabled={month === "1900-01"}><ChevronLeft size={18}/></button>
         <label className="finance-cal-month-picker"><span>{title}</span><input aria-label={copy.chooseMonth} type="month" value={month} min="1900-01" max="9998-11" onChange={event => moveTo(event.target.value)}/></label>
         <button type="button" className="finance-cal-icon-button" onClick={() => moveBy(1)} aria-label={copy.next} disabled={month === "9998-11"}><ChevronRight size={18}/></button>
@@ -191,6 +209,7 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
     </header>
     <div className="finance-cal-metrics" aria-live="polite" aria-busy={!current}><span><ArrowUpRight size={13}/> {copy.expenses} <strong>{current ? money(monthTotals.expenseCents) : "…"}</strong></span>{compact && monthTotals.scheduledExpenseCents > 0 && <span>{copy.scheduled}: <strong>{money(monthTotals.scheduledExpenseCents)}</strong></span>}{!compact && <><span><ArrowDownLeft size={13}/> {copy.income} <strong>{current ? money(monthTotals.incomeCents) : "…"}</strong></span><span className="finance-cal-result">{copy.result} <strong>{current ? money(monthTotals.incomeCents - monthTotals.expenseCents) : "…"}</strong></span></>}</div>
     {monthDueCents > 0 && <div className="finance-cal-dues-total"><AppTooltip content={copy.billHint}><span><CreditCard size={13} aria-hidden="true"/>{copy.billsDue} <strong>{money(monthDueCents)}</strong></span></AppTooltip></div>}
+    {showPlanning && <div className="finance-cal-metrics" aria-label={planning("plan")}>{["limits","goals","plan"].map(kind=><label key={kind}><input type="checkbox" checked={markerKinds.includes(kind)} onChange={event=>setMarkerKinds(current=>event.target.checked?[...current,kind]:current.filter(value=>value!==kind))}/>{planning(kind)}</label>)}</div>}
     {!compact && (monthTotals.scheduledExpenseCents > 0 || monthTotals.scheduledIncomeCents > 0) && <div className="finance-cal-metrics"><span>{copy.scheduled} · {copy.expenses}: <strong>{money(monthTotals.scheduledExpenseCents)}</strong></span><span>{copy.income}: <strong>{money(monthTotals.scheduledIncomeCents)}</strong></span></div>}
     <div className="finance-cal-body" data-compact={compact || undefined}>
       <div className="finance-cal-month-area" onTouchStart={event => { const point = event.touches[0]; touchStart.current = point ? { x: point.clientX, y: point.clientY } : null; }} onTouchEnd={event => { const point = event.changedTouches[0]; const start = touchStart.current; if (point && start) { const dx = point.clientX - start.x; const dy = point.clientY - start.y; if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.5) moveBy(dx < 0 ? 1 : -1); } touchStart.current = null; }}>
@@ -210,6 +229,7 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
                 <span className="finance-cal-day-number">{Number(day.slice(8))}</span>
                 <span className="finance-cal-day-money">{!outside && (value?.expenseCents || value?.scheduledExpenseCents) ? `−${cellMoney(value.expenseCents + value.scheduledExpenseCents)}` : ""}</span>
                 {dues.length > 0 && <span className="finance-cal-bill-badge"><CreditCard size={compact ? 9 : 11} aria-hidden="true"/><span>{cellMoney(dueCents)}</span></span>}
+                {showPlanning && !outside && activeMarkers.some(marker => marker.date === day) && <span className="finance-cal-plan-dot" title={activeMarkers.filter(marker => marker.date === day).map(marker => `${planning(marker.kind)}: ${marker.label} · ${money(marker.amountCents)}`).join("; ")}>◷</span>}
                 <span className="finance-cal-day-dots" aria-hidden="true">{Boolean(value?.incomeCents || value?.scheduledIncomeCents) && <i className="income"/>}{Boolean(value?.expenseCents || value?.scheduledExpenseCents) && <i className="expense"/>}</span>
               </button>;
               return <AppTooltip key={day} content={<span className="finance-cal-tooltip-copy">{dues.length ? billTooltip(day) : dailyLabel}</span>} disabled={outside || (!current && !dues.length)} className="finance-cal-day-tooltip">{cell}</AppTooltip>;
@@ -222,6 +242,7 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
       {(!compact || compactDetails) && <aside className="finance-cal-day-panel" id="finance-cal-details" aria-busy={!current} aria-label={`${copy.entries} · ${dateName}`}>
         <div className="finance-cal-day-heading"><div><span>{copy.selected}</span><h3>{dateName}</h3></div><span className="finance-cal-count">{current ? `${chosenTotals.count} ${copy.entries}` : "…"}</span>{compact && <button type="button" className="finance-cal-icon-button" aria-label={copy.close} onClick={() => setCompactDetails(false)}><X size={14}/></button>}</div>
         {selected > today && <small className="muted">{copy.future}</small>}
+        {showPlanning && activeMarkers.filter(marker => marker.date === selected).map(marker => <Link key={marker.id} href={marker.href} className="finance-cal-plan-entry"><span>{planning(marker.kind)} · {marker.label}</span><b>{money(marker.amountCents)}</b><small>{planning("intro")}</small></Link>)}
         <div className="finance-cal-day-summary"><span>{copy.expenses} <strong>{current ? money(chosenTotals.expenseCents + chosenTotals.scheduledExpenseCents) : "…"}</strong></span><span>{copy.income} <strong>{current ? money(chosenTotals.incomeCents + chosenTotals.scheduledIncomeCents) : "…"}</strong></span></div>
         {selectedDues.length > 0 && <div className="finance-cal-bills">
           <h4><CreditCard size={14}/>{copy.billsDue}</h4>
@@ -243,7 +264,7 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
           })}
         </div>
         {hasUndetailedStatements && <p className="finance-cal-aggregate-hint">{copy.undetailedHint} <Link href="/finance/statements">{copy.viewStatements}</Link></p>}
-        <div className="finance-cal-day-footer">{canWrite && <><button type="button" className="button" onClick={() => openAdd("EXPENSE")}><Plus size={15}/> {copy.expense}</button><button type="button" className="button-secondary" onClick={() => openAdd("INCOME")}><Plus size={15}/> {copy.revenue}</button></>}{canWrite && canManageCards && <CardExpenseButton date={selected} className="finance-cal-credit-link"><CreditCard size={14}/>{copy.card}</CardExpenseButton>}</div>
+        <div className="finance-cal-day-footer">{canWrite && <><button type="button" className="button" onClick={() => openAdd("EXPENSE")}><Plus size={15}/> {copy.expense}</button><button type="button" className="button-secondary" onClick={() => openAdd("INCOME")}><Plus size={15}/> {copy.revenue}</button></>}{canWrite && canManageCards && <FinanceWriteOnly><CardExpenseButton date={selected} className="finance-cal-credit-link"><CreditCard size={14}/>{copy.card}</CardExpenseButton></FinanceWriteOnly>}</div>
         {!compact && <Link className="finance-cal-all-link" href="/finance/transactions">{copy.all} <ArrowRight size={14}/></Link>}
       </aside>}
     </div>
@@ -262,7 +283,7 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
         </fieldset></form>
       </div>
     </dialog>}
-    {canWrite && canManageCards && <CardExpenseDialog today={selected} cards={accounts.filter(a => a.type === "CREDIT_CARD").map(a => ({ id: a.id, name: a.name, institution: null }))} categories={categories.filter(c => c.type === "EXPENSE")} statements={statements} onSaved={date => { setMonths({}); if (compact) { setCompactSelection({ month: date.slice(0, 7), day: date }); setCompactDetails(true); } syncUrl(date.slice(0, 7), date, true); }}/> }
+    {canWrite && canManageCards && <FinanceWriteOnly><CardExpenseDialog today={selected} cards={accounts.filter(a => a.type === "CREDIT_CARD").map(a => ({ id: a.id, name: a.name, institution: null }))} categories={categories.filter(c => c.type === "EXPENSE")} statements={statements} onSaved={date => { setMonths({}); if (compact) { setCompactSelection({ month: date.slice(0, 7), day: date }); setCompactDetails(true); } syncUrl(date.slice(0, 7), date, true); }}/></FinanceWriteOnly> }
     {!compact && <p className="finance-cal-hint">{copy.registeredHint}</p>}
   </section>;
 }

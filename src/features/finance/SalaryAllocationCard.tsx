@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { usePlanningCopy } from "./planning/copy";
 import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, Info, PieChart } from "lucide-react";
 import { AppTooltip } from "@/components/ui/AppTooltip";
 import { FixedExpensesDialog, type CardOption, type FixedExpenseRow } from "./FixedExpensesDialog";
@@ -113,9 +115,10 @@ function AllocationPanel({ id, title, hint, allocation, view, onHideBill, childr
 /** Where the income is planned to go, month by month, in two charts that always agree with each other:
  * one with everything (fixed expenses, card bills and variable spending) and one with only the fixed expenses.
  * A shortfall is an alert, never a slice. What is left is a plan figure, not the bank balance. */
-export function SalaryAllocationCard({ plan, expenses, cards, currentMonth }: { plan: SalaryPlanView; expenses: FixedExpenseRow[]; cards: CardOption[]; currentMonth: string }) {
+export function SalaryAllocationCard({ plan, expenses, cards, paymentAccounts = [], currentMonth }: { plan: SalaryPlanView; expenses: FixedExpenseRow[]; cards: CardOption[]; paymentAccounts?: CardOption[]; currentMonth: string }) {
   const privacyBoundary = useFinancePrivacyBoundary();
-  const [monthIndex, setMonthIndex] = useState(0);
+  const params = useSearchParams(), planning = usePlanningCopy();
+  const [monthIndex, setMonthIndex] = useState(() => Math.max(0, plan.months.findIndex(month => month.month === params.get("month"))));
   const [view, setView] = useState<Grouping>("item");
   // Bills taken out of a chart are remembered per month, as "2032-11:card".
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
@@ -143,7 +146,7 @@ export function SalaryAllocationCard({ plan, expenses, cards, currentMonth }: { 
           <button type="button" aria-pressed={view === "item"} onClick={() => setView("item")}>Por item</button>
           <button type="button" aria-pressed={view === "kind"} onClick={() => setView("kind")}>Por tipo</button>
         </div>
-        <FixedExpensesDialog expenses={expenses} cards={cards} currentMonth={currentMonth}/>
+        <FixedExpensesDialog expenses={expenses} cards={cards} paymentAccounts={paymentAccounts} currentMonth={currentMonth}/>
       </div>
     </header>
 
@@ -151,9 +154,10 @@ export function SalaryAllocationCard({ plan, expenses, cards, currentMonth }: { 
       <div><span>Faturas abertas · todos os vencimentos</span><strong>{money(plan.openBillsCents ?? 0)}</strong><small>Saldo ainda a pagar. <Link href="/finance/statements">Conferir faturas</Link></small></div>
       <div><span>Faturas no gráfico · {monthTitle(month.month)}</span><strong>{money(complete.billsGrossCents)}</strong><small>A pagar {money(complete.bills.reduce((sum,bill)=>sum+bill.toPayCents,0))} · já pago no mês {money(complete.bills.reduce((sum,bill)=>sum+bill.paidCents,0))}</small></div>
     </div>}
+    {month.incomeKnown === false && <p className="salary-note">{planning("INCOME_UNKNOWN")}</p>}
     <div className="salary-pair">
       <AllocationPanel id="salary-complete" title="Fixos, faturas e variáveis" hint="Faturas integrais do mês, mais os fixos que ainda não estão nelas e as variáveis." allocation={complete} view={view} onHideBill={hide}>
-        {coveredItems.length > 0 && <details className="salary-covered"><summary>{money(complete.fixedIncludedInBillsCents)} de fixos já dentro das faturas · ver gastos</summary><ul className="salary-members">{coveredItems.map((item,index)=><li key={`${item.kind}:${item.id ?? index}`}><span>{item.name}</span><b>{money(item.includedInBillsCents ?? 0)}</b></li>)}</ul></details>}
+        {coveredItems.length > 0 && complete.fixedIncludedInBillsCents > 0 && <details className="salary-covered"><summary>{money(complete.fixedIncludedInBillsCents)} de fixos já dentro das faturas · ver gastos</summary><ul className="salary-members">{coveredItems.map((item,index)=><li key={`${item.kind}:${item.id ?? index}`}><span>{item.name}</span><b>{money(item.includedInBillsCents ?? 0)}</b></li>)}</ul></details>}
         {overflow && <div className="salary-alert" role="alert"><AlertTriangle size={16} aria-hidden="true"/><span><strong>Os compromissos passam do que a renda comporta.</strong> Fixos fora das faturas de {money(complete.fixedOutsideBillsCents)} mais faturas integrais de {money(complete.billsCents)} somam {money(complete.fixedOutsideBillsCents + complete.billsCents)}, {money(complete.fixedOutsideBillsCents + complete.billsCents - complete.incomeCents)} acima da renda prevista de {money(complete.incomeCents)}.{complete.variableCents > 0 ? ` Ainda há ${money(complete.variableCents)} de variáveis.` : ""} Escolha uma fatura para conferir os valores e, se quiser simular sua exclusão, tirá-la só deste gráfico.</span></div>}
         {!overflow && complete.deficitCents > 0 && <div className="salary-alert" role="alert"><AlertTriangle size={16} aria-hidden="true"/><span><strong>Compromissos acima da renda prevista em {money(complete.deficitCents)}.</strong> O gráfico mostra a divisão dos {money(complete.commitmentsCents)} comprometidos; não há sobra prevista.</span></div>}
         {hiddenBills.length > 0 && <p className="salary-hidden">Fora do gráfico: {hiddenBills.map((bill: BillGroup) => <button key={bill.key} type="button" onClick={() => show(bill.key)}>{bill.label} · mostrar de novo</button>)}</p>}

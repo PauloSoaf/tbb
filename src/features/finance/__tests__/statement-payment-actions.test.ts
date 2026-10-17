@@ -60,7 +60,7 @@ describe("registerStatementPayment", () => {
   });
 
   it("treats a simultaneous duplicate (unique fingerprint) as already registered, not as a failure", async () => {
-    mocks.transaction.mockRejectedValue(new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "6" }));
+    mocks.transaction.mockRejectedValue(new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", meta: { target: ["workspaceId", "fingerprint"] }, clientVersion: "6" }));
     expect(await registerStatementPayment(form(valid))).toEqual({ success: "Este pagamento já estava registrado.", already: true });
   });
 });

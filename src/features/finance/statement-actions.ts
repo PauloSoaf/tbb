@@ -9,6 +9,7 @@ import { dateOnly, parseMoney } from "./money";
 import { periodKeyFor } from "./card-statements";
 import { applyStatementPayment, undoStatementPayment } from "./statement-payment-service";
 import type { PaymentMode } from "./statement-payment";
+import type { BankSettlementInput } from "./planning/bank-settlement";
 
 /** Corrections preserve statement identity and linked purchases; no ledger entry is created. */
 export async function correctCardStatement(fd: FormData) {
@@ -78,12 +79,13 @@ export async function registerStatementPayment(fd: FormData) {
       statementId: text("id"), version: text("version"), mode, amountCents: text("amount") ? parseMoney(text("amount")) : null,
       paidOn: text("paidOn") || null, unknownDate: fd.get("unknownDate") === "on", nextStatementId: text("nextStatementId") || null,
       carryIncluded: fd.get("carryIncluded") === "on", confirmed: fd.get("confirm") === "on", token: text("token"), today: dayKey(new Date(), ctx.workspace.timezone),
+      bank: { mode: (text("bankMode") || "UNRECONCILED") as BankSettlementInput["mode"], accountId: text("bankAccountId"), transactionId: text("bankTransactionId"), balanceConfirmed: fd.get("balanceConfirmed") === "on" },
     }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     revalidateFinance();
     return { success: outcome.message, already: outcome.already };
   } catch (error) {
     // The unique fingerprint is the last line of defense against two simultaneous submissions of one token.
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return { success: "Este pagamento já estava registrado.", already: true };
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002" && JSON.stringify(error.meta?.target ?? "").includes("fingerprint")) return { success: "Este pagamento já estava registrado.", already: true };
     return { error: error instanceof Error ? error.message : "Não foi possível registrar o pagamento." };
   }
 }

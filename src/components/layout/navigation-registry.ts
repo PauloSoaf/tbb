@@ -3,6 +3,7 @@ import { adminItem, navGroups } from "./navigation";
 
 /** Translation key of every menu route. The single source for sidebar labels and breadcrumbs. */
 const NAV_KEYS: Record<string, string> = {
+  "/finance/forecasts": "forecasts", "/finance/limits": "spending_limits",
   "/today": "today", "/habits": "habits", "/tasks": "tasks", "/goals": "goals", "/projects": "projects", "/calendar": "calendar",
   "/finance": "overview", "/finance/transactions": "transactions", "/finance/calendar": "spending_calendar", "/finance/accounts": "accounts", "/finance/budgets": "budgets",
   "/finance/subscriptions": "subscriptions", "/finance/debts": "debts", "/finance/statements": "statements", "/finance/savings": "savings", "/finance/assets": "personal_assets",

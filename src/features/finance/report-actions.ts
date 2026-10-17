@@ -5,12 +5,13 @@ import { prisma } from "@/lib/prisma";
 import { financeOverview } from "./overview-query";
 import { cardStatementRows } from "./queries";
 import { buildFinancialReport } from "./financial-report";
+import { financialPlanningData } from "./planning/query";
 const day=(value:Date|null)=>value?.toISOString().slice(0,10)||null;
 export async function exportFinancialReport(){
   const ctx=await requirePermission("READ");
   if(ctx.role!=="OWNER")return {error:"O relatório completo, incluindo faturas privadas, está disponível somente ao titular."};
   const today=dayKey(new Date(),ctx.workspace.timezone);
-  const [overview,statements,transactions,debts,subscriptions,goals,investments,payments,pending]=await Promise.all([
+  const [overview,statements,transactions,debts,subscriptions,goals,investments,payments,pending,planning]=await Promise.all([
     financeOverview(ctx.workspaceId,today,{statementViewer:ctx}),cardStatementRows(ctx),
     prisma.financeTransaction.findMany({where:{workspaceId:ctx.workspaceId},include:{account:{select:{name:true}},destinationAccount:{select:{name:true}},category:{select:{name:true}}},orderBy:[{date:"asc"},{id:"asc"}]}),
     prisma.debt.findMany({where:{workspaceId:ctx.workspaceId},orderBy:{name:"asc"}}),
@@ -19,8 +20,10 @@ export async function exportFinancialReport(){
     prisma.investmentPosition.findMany({where:{workspaceId:ctx.workspaceId,account:{archivedAt:null},asset:{archivedAt:null}},include:{asset:{select:{name:true}},account:{select:{name:true}}},orderBy:{id:"asc"}}),
     prisma.cardStatementPayment.findMany({where:{workspaceId:ctx.workspaceId},include:{account:{select:{name:true}},cardStatement:{select:{referenceMonth:true,dueDate:true}}},orderBy:{date:"asc"}}),
     prisma.financialEvidence.findMany({where:{workspaceId:ctx.workspaceId,decision:"NEEDS_REVIEW"},select:{locator:true,candidate:true,reason:true,source:{select:{fileName:true}}}}),
+    financialPlanningData(ctx,today,today.slice(0,7)+"-01",12),
   ]);
   return {report:buildFinancialReport(overview,{
+    planning,
     statements:statements.sort((a,b)=>(a.dueDate||a.referenceMonth||"").localeCompare(b.dueDate||b.referenceMonth||"")),
     transactions:transactions.map((t)=>({...t,date:day(t.date)!,postedDate:day(t.postedDate),purchasedDate:day(t.purchasedDate),occurredAt:t.occurredAt?.toISOString()||null,account:t.account.name,destination:t.destinationAccount?.name||null,category:t.category?.name||null})),
     debts:debts.map((d)=>({...d,targetPayoffDate:day(d.targetPayoffDate)})),

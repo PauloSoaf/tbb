@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { dateOnly, money } from "./money";
 import { outstandingOf, planStatementPayment, type PaymentMode, type PaymentPlan } from "./statement-payment";
+import { reconcileBankSettlement, type BankSettlementInput } from "./planning/bank-settlement";
 
 /** Server side of "Marcar como paga". Every call runs inside the caller's serializable transaction and
  * writes only the liability: a payment row, the bill's status and one audit event. It never touches the
@@ -17,6 +18,7 @@ export type PaymentInput = {
   nextStatementId: string | null; carryIncluded: boolean; confirmed: boolean; token: string; today: string;
   /** Free text kept in the audit event, e.g. when the change is applied on the owner's behalf. */
   note?: string;
+  bank?: BankSettlementInput;
 };
 export type PaymentOutcome = { already: boolean; message: string; plan?: PaymentPlan };
 
@@ -63,19 +65,23 @@ export async function applyStatementPayment(db: PaymentDb, actor: PaymentActor, 
     workspaceId: actor.workspaceId, accountId: statement.accountId, cardStatementId: statement.id, fingerprint, amountCents: plan.payment.amountCents,
     date: plan.payment.date ? dateOnly(plan.payment.date) : null, origin: "MANUAL_VERIFIED", sourceId: "MANUAL", locator: input.token,
   }, select: { id: true } }) : null;
+  const bank = payment && input.bank ? await reconcileBankSettlement(db, actor, {
+    id: payment.id, accountId: statement.accountId, amountCents: plan.payment!.amountCents, date: plan.payment!.date, fingerprint,
+  }, input.bank, input.today) : null;
 
-  const after = { status: plan.closes ? "PAID" : statement.status, paidAt: plan.closes ? plan.paidAt : day(statement.paidAt), rolledIntoStatementId: plan.carry?.nextId ?? statement.rolledIntoStatementId };
+  const effectivePaidAt = bank?.effectiveDate ?? plan.paidAt;
+  const after = { status: plan.closes ? "PAID" : statement.status, paidAt: plan.closes ? effectivePaidAt : day(statement.paidAt), rolledIntoStatementId: plan.carry?.nextId ?? statement.rolledIntoStatementId };
   // Optimistic lock: only the exact version the user looked at can be changed.
   const changed = await db.cardStatement.updateMany({ where: { id: statement.id, workspaceId: actor.workspaceId, status: "OPEN", updatedAt: statement.updatedAt }, data: {
     updatedAt: new Date(),
-    ...(plan.closes ? { status: "PAID" as const, paidAt: plan.paidAt ? dateOnly(plan.paidAt) : null, ...(plan.carry ? { rolledIntoStatementId: plan.carry.nextId } : {}) } : {}),
+    ...(plan.closes ? { status: "PAID" as const, paidAt: effectivePaidAt ? dateOnly(effectivePaidAt) : null, ...(plan.carry ? { rolledIntoStatementId: plan.carry.nextId } : {}) } : {}),
   } });
   if (changed.count !== 1) throw new Error("Esta fatura mudou durante o registro. Atualize a página e tente de novo.");
 
   await db.activityEvent.create({ data: {
     workspaceId: actor.workspaceId, actorUserId: actor.userId, type: PAYMENT_EVENT, entityType: "CardStatement", entityId: statement.id, source: "MANUAL",
     metadata: {
-      mode: input.mode, paymentId: payment?.id ?? null, amountCents: plan.payment?.amountCents ?? 0, paidOn: plan.payment?.date ?? null, dateUnknown: Boolean(plan.payment && !plan.payment.date),
+      mode: input.mode, paymentId: payment?.id ?? null, amountCents: plan.payment?.amountCents ?? 0, paidOn: plan.payment?.date ?? null, dateUnknown: Boolean(plan.payment && !plan.payment.date), ...(bank ?? {}),
       carriedCents: plan.carry?.cents ?? 0, nextStatementId: plan.carry?.nextId ?? null, outstandingBeforeCents: owed, outstandingAfterCents: plan.outstandingAfterCents, token: input.token, ...(input.note ? { note: input.note.slice(0, 300) } : {}),
       before: { status: statement.status, paidAt: day(statement.paidAt), rolledIntoStatementId: statement.rolledIntoStatementId }, after,
     },
@@ -109,15 +115,31 @@ export async function undoStatementPayment(db: PaymentDb, actor: PaymentActor, i
   if (statement.updatedAt.toISOString() !== input.version) throw new Error("Esta fatura mudou. Atualize a página antes de desfazer.");
   const target = (await undoableManualPayments(db, actor.workspaceId, [statement.id])).get(statement.id);
   if (!target) throw new Error("Não há pagamento manual para desfazer nesta fatura.");
-  const meta = target.metadata as { paymentId?: string | null; before?: { status: "OPEN" | "PAID" | "FUTURE_KNOWN" | "FORECAST"; paidAt: string | null; rolledIntoStatementId: string | null }; after?: { status: string; paidAt: string | null; rolledIntoStatementId: string | null } };
+  const meta = target.metadata as { paymentId?: string | null; bankTransactionId?: string | null; bankMode?: string; bankRevision?: number; before?: { status: "OPEN" | "PAID" | "FUTURE_KNOWN" | "FORECAST"; paidAt: string | null; rolledIntoStatementId: string | null }; after?: { status: string; paidAt: string | null; rolledIntoStatementId: string | null } };
   if (!meta.before || !meta.after) throw new Error("O registro deste pagamento não permite desfazer.");
   // Only if nothing else touched the bill since: the state must still be exactly what the payment left.
   const current = { status: statement.status, paidAt: day(statement.paidAt), rolledIntoStatementId: statement.rolledIntoStatementId };
   const unchangedStatus = meta.after.status === current.status && meta.after.paidAt === current.paidAt && meta.after.rolledIntoStatementId === current.rolledIntoStatementId;
   if (meta.before.status !== "OPEN" || !unchangedStatus) throw new Error("A fatura mudou depois do pagamento. Revise-a antes de desfazer.");
   if (meta.paymentId) {
+    const payment = await db.cardStatementPayment.findFirst({ where: { id: meta.paymentId, workspaceId: actor.workspaceId, cardStatementId: statement.id, origin: "MANUAL_VERIFIED" } });
+    if (!payment) throw new Error("O pagamento registrado não foi encontrado; nada foi desfeito.");
+    if (payment.bankTransactionId && payment.bankTransactionId !== meta.bankTransactionId) {
+      const [reconciliation] = await db.activityEvent.findMany({ where: { workspaceId: actor.workspaceId, entityType: "CardStatementPayment", entityId: payment.id, type: "finance.bank_settlement_reconciled" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 1 });
+      const recorded = reconciliation?.metadata as { bankTransactionId?: string; bankRevision?: number; mode?: string } | undefined;
+      if (recorded?.bankTransactionId !== payment.bankTransactionId) throw new Error("A conciliação bancária mudou. Revise antes de desfazer.");
+      meta.bankTransactionId = payment.bankTransactionId; meta.bankMode = recorded.mode; meta.bankRevision = recorded.bankRevision;
+    }
+    if (meta.bankTransactionId && meta.bankMode === "CREATED") {
+      const bank = await db.financeTransaction.findFirst({ where: { id: meta.bankTransactionId, workspaceId: actor.workspaceId, source: "BANK_SETTLEMENT", revision: meta.bankRevision ?? 0 } });
+      if (!bank) throw new Error("A liquidação bancária foi alterada. Confira antes de desfazer.");
+    }
     const removed = await db.cardStatementPayment.deleteMany({ where: { id: meta.paymentId, workspaceId: actor.workspaceId, cardStatementId: statement.id, origin: "MANUAL_VERIFIED" } });
     if (removed.count !== 1) throw new Error("O pagamento registrado não foi encontrado; nada foi desfeito.");
+    if (meta.bankTransactionId && meta.bankMode === "CREATED") {
+      const removedBank = await db.financeTransaction.deleteMany({ where: { id: meta.bankTransactionId, workspaceId: actor.workspaceId, source: "BANK_SETTLEMENT", revision: meta.bankRevision ?? 0 } });
+      if (removedBank.count !== 1) throw new Error("A liquidação bancária mudou; nada foi desfeito.");
+    }
   }
   const restored = await db.cardStatement.updateMany({ where: { id: statement.id, workspaceId: actor.workspaceId, updatedAt: statement.updatedAt }, data: {
     updatedAt: new Date(), status: "OPEN", paidAt: meta.before.paidAt ? dateOnly(meta.before.paidAt) : null, rolledIntoStatementId: meta.before.rolledIntoStatementId,

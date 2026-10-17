@@ -1,3 +1,6 @@
+
+import { FinanceWriteOnly } from "@/features/finance/FinanceWriteAccess";
+import { financePageAccess } from "@/features/finance/finance-page-access";
 import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, CalendarClock, CreditCard, Info, Landmark, Layers, Plus, ShieldCheck, Upload } from "lucide-react";
@@ -20,25 +23,26 @@ import { money } from "@/features/finance/money";
 import { canReadCardStatements, cardStatementRows, creditCardPositions, monthlyIncomeReference } from "@/features/finance/queries";
 import { addDays, dayKey, formatDay } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceContext } from "@/lib/workspace";
 
 export const metadata = { title: "Faturas" };
 
 export default async function CardStatementsPage() {
-  const c = await getWorkspaceContext();
-  if (!canReadCardStatements(c)) return <FinancePrivacyBoundary><div className="stack">
+  const c = await financePageAccess();
+  if (!canReadCardStatements(c)) return <FinancePrivacyBoundary canWrite={c.canWrite}><div className="stack">
     <PageHeader eyebrow="MONEY · FATURAS" title="Faturas dos cartões."/>
     <div className="panel"><EmptyState title="Faturas visíveis só para o titular" description="As faturas de cartão deste espaço são dados pessoais do titular e não aparecem para outros membros."/></div>
   </div></FinancePrivacyBoundary>;
 
   const today = dayKey(new Date(), c.workspace.timezone);
   const rows = await cardStatementRows(c);
-  const [positions, incomeCents, categories, linked, bankLimits] = await Promise.all([
+  const [positions, incomeCents, categories, linked, bankLimits, bankAccounts, bankTransactions] = await Promise.all([
     creditCardPositions(c.workspaceId, today, rows),
     monthlyIncomeReference(c.workspaceId, today),
     prisma.financeCategory.findMany({ where: { workspaceId: c.workspaceId, isArchived: false, type: "EXPENSE" }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     prisma.financeTransaction.findMany({ where: { workspaceId: c.workspaceId, cardStatementId: { not: null }, type: { in: ["EXPENSE", "REFUND"] } }, select: { id: true, description: true, merchant: true, amountCents: true, date: true, cardStatementId: true, statementDetailMode: true, type: true, eventKind: true, postedDate: true, occurredAt: true, occurredTimezone: true }, orderBy: [{ date: "desc" }, { createdAt: "desc" }] }),
     prisma.financialSnapshot.findMany({ where: { workspaceId: c.workspaceId, kind: "BANK_CREDIT_LIMIT" }, select: { accountId: true, asOfDate: true, payload: true }, orderBy: [{ asOfDate: "desc" }, { createdAt: "desc" }], take: 100 }),
+    prisma.account.findMany({ where: { workspaceId: c.workspaceId, isArchived: false, type: { in: ["CHECKING", "SAVINGS", "CASH", "DIGITAL_WALLET"] } }, select: { id: true, name: true } }),
+    prisma.financeTransaction.findMany({ where: { workspaceId: c.workspaceId, account: { type: { in: ["CHECKING", "SAVINGS", "CASH", "DIGITAL_WALLET"] } }, OR: [{ type: "TRANSFER", destinationAccount: { type: "CREDIT_CARD" } }, { type: "EXPENSE", isConsumption: false, eventKind: { in: ["CARD_SETTLEMENT", "CARD_PAYMENT"] } }], date: { lte: new Date(`${today}T00:00:00Z`) }, bankStatementPayment: null }, select: { id: true, accountId: true, destinationAccountId: true, amountCents: true, date: true, description: true }, orderBy: { date: "desc" }, take: 100 }),
   ]);
   const s = summarizeCardStatements(rows, today);
   const undoable = await undoableManualPayments(prisma, c.workspaceId, rows.filter((row) => row.status === "PAID" || row.status === "OPEN").map((row) => row.id));
@@ -64,17 +68,18 @@ export default async function CardStatementsPage() {
   const provenance = (row: StatementRow) => <StatementProvenanceTooltip subject={`${row.accountName} ${row.dueDate ? `com vencimento ${day(row.dueDate)}` : month(row.referenceMonth)}`} view={describeProvenance(row.provenance, { timeZone: c.workspace.timezone, today, now, status: row.status })}/>;
   // Both dialogs sit side by side and restart when the bill changes; their keys must differ, or React confuses them.
   const payment = (row: StatementRow, compact = false) => row.version && row.kind === "STATEMENT" && row.status === "OPEN" && row.dueDate
-    ? <StatementPaymentDialog key={`pay-${row.version}`} compact={compact} today={today}
+    ? <FinanceWriteOnly><StatementPaymentDialog key={`pay-${row.version}`} compact={compact} today={today}
+      bankAccounts={bankAccounts} bankTransactions={bankTransactions.map(row => ({ ...row, date: row.date.toISOString().slice(0, 10) }))}
       statement={{ id: row.id, version: row.version, accountId: row.accountId, accountName: row.accountName, dueDate: row.dueDate, declaredCents: row.declaredCents ?? row.amountCents, addedCents: row.addedCents ?? 0, paidCents: row.paidCents ?? 0, outstandingCents: row.amountCents, amountIsOutstanding: Boolean(row.amountIsOutstanding), sourceAsOf: row.provenance?.bankAsOfDate ?? null, carriedInto: row.rolledIntoStatementId && byId.get(row.rolledIntoStatementId)?.dueDate ? { id: row.rolledIntoStatementId, dueDate: byId.get(row.rolledIntoStatementId)!.dueDate!, amountCents: byId.get(row.rolledIntoStatementId)!.amountCents } : null }}
       carryOptions={rows.filter((other) => other.accountId === row.accountId && other.id !== row.id && other.kind === "STATEMENT" && (other.status === "OPEN" || other.status === "FUTURE_KNOWN") && !other.rolledIntoStatementId && other.dueDate && other.dueDate > row.dueDate!)
-        .sort((a, b) => a.dueDate!.localeCompare(b.dueDate!)).map((other) => ({ id: other.id, dueDate: other.dueDate!, amountCents: other.amountCents, status: other.status as "OPEN" | "FUTURE_KNOWN" }))}/>
+        .sort((a, b) => a.dueDate!.localeCompare(b.dueDate!)).map((other) => ({ id: other.id, dueDate: other.dueDate!, amountCents: other.amountCents, status: other.status as "OPEN" | "FUTURE_KNOWN" }))}/></FinanceWriteOnly>
     : null;
-  const undo = (row: StatementRow) => undoable.has(row.id) && row.version ? <UndoPaymentButton statementId={row.id} version={row.version} label={`${row.accountName} ${row.dueDate ? day(row.dueDate) : month(row.referenceMonth)}`}/> : null;
-  const correction = (row: StatementRow, compact = false) => row.version && row.status !== "PAID" ? <StatementCorrectionDialog key={`edit-${row.version}`} compact={compact} statement={{ ...row, version: row.version, declaredCents: row.declaredCents ?? row.amountCents, addedCents: row.addedCents ?? 0 }}/> : null;
+  const undo = (row: StatementRow) => undoable.has(row.id) && row.version ? <FinanceWriteOnly><UndoPaymentButton statementId={row.id} version={row.version} label={`${row.accountName} ${row.dueDate ? day(row.dueDate) : month(row.referenceMonth)}`}/></FinanceWriteOnly> : null;
+  const correction = (row: StatementRow, compact = false) => row.version && row.status !== "PAID" ? <FinanceWriteOnly><StatementCorrectionDialog key={`edit-${row.version}`} compact={compact} statement={{ ...row, version: row.version, declaredCents: row.declaredCents ?? row.amountCents, addedCents: row.addedCents ?? 0 }}/></FinanceWriteOnly> : null;
 
-  return <FinancePrivacyBoundary><div className="stack statements-page">
+  return <FinancePrivacyBoundary canWrite={c.canWrite}><div className="stack statements-page">
     <PageHeader eyebrow="MONEY · FATURAS" title="Faturas dos cartões." description="Dívida atual, compromissos futuros e histórico quitado, separados dos lançamentos do dia a dia.">
-      <CardExpenseButton className="button"><Plus size={15}/>Adicionar gasto no cartão</CardExpenseButton>
+      <FinanceWriteOnly><CardExpenseButton className="button"><Plus size={15}/>Adicionar gasto no cartão</CardExpenseButton></FinanceWriteOnly>
       <a className="button-secondary" href="#importar"><Upload size={15}/>Importar faturas</a>
       <Link className="button-secondary" href="/finance/accounts"><Landmark size={15}/>Contas e cartões</Link>
     </PageHeader>
@@ -150,7 +155,7 @@ export default async function CardStatementsPage() {
           <CreditLimitBreakdown breakdown={card.breakdown} editHref={`/finance/accounts?edit=${card.id}`}/>
           {next?.notes && <small className="muted">{next.notes}</small>}
           {bankLimit && typeof reportedAvailable === "number" && Number.isSafeInteger(reportedAvailable) && <small className="muted">Banco informou disponível {money(reportedAvailable)} em {day(bankLimit.asOfDate.toISOString().slice(0, 10))}. A barra acima usa os compromissos registrados no TBB.</small>}
-          <div className="row">{next && payment(next)}{next && correction(next)}<Link className="button-secondary" href={`/finance/accounts?edit=${card.id}`}>Editar cartão</Link><CardExpenseButton accountId={card.id}><Plus size={14}/>Adicionar gasto</CardExpenseButton><Link className="button-secondary" href={`/finance/transactions?account=${card.id}`}>Ver transações</Link></div>
+          <div className="row">{next && payment(next)}{next && correction(next)}<Link className="button-secondary" href={`/finance/accounts?edit=${card.id}`}>Editar cartão</Link><FinanceWriteOnly><CardExpenseButton accountId={card.id}><Plus size={14}/>Adicionar gasto</CardExpenseButton></FinanceWriteOnly><Link className="button-secondary" href={`/finance/transactions?account=${card.id}`}>Ver transações</Link></div>
         </article>;
       })}</section>
 
@@ -163,7 +168,7 @@ export default async function CardStatementsPage() {
             <td className="statement-amount">{money(row.amountCents)}{provenance(row)}{row.addedCents ? <small>inclui {money(row.addedCents)} somado</small> : null}</td>
             <td>{detail(row)}</td>
             <td><span className="statement-chip" data-tone={row.overdue ? "danger" : "open"}>{row.overdue ? "Vencida, não paga" : "Aberta"}</span>{row.paidCents ? <small className="muted block">pago {money(row.paidCents)}</small> : null}</td>
-            <td><div className="row">{payment(row, true)}{undo(row)}{correction(row, true)}<CardExpenseButton accountId={row.accountId} statementId={row.id} className="icon-button" label={`Adicionar gasto na fatura ${row.accountName} de ${day(row.dueDate)}`}><Plus size={16}/></CardExpenseButton></div></td>
+            <td><div className="row">{payment(row, true)}{undo(row)}{correction(row, true)}<FinanceWriteOnly><CardExpenseButton accountId={row.accountId} statementId={row.id} className="icon-button" label={`Adicionar gasto na fatura ${row.accountName} de ${day(row.dueDate)}`}><Plus size={16}/></CardExpenseButton></FinanceWriteOnly></div></td>
           </tr>)}
         </tbody><tfoot><tr><th colSpan={3}>Total aberto</th><th colSpan={4}>{money(s.openCents)}</th></tr></tfoot></table></div> : <p className="muted">Nenhuma fatura aberta.</p>}
       </section>
@@ -176,7 +181,7 @@ export default async function CardStatementsPage() {
             <td>{row.referenceMonth ? month(row.referenceMonth) : "—"}</td><td>{closing(row)}</td><td>{day(row.dueDate)}</td>
             <td className="statement-amount">{money(row.amountCents)}{provenance(row)}{row.addedCents ? <small>inclui {money(row.addedCents)} somado</small> : null}</td>
             <td><span className="statement-chip" data-tone={row.awaitingUpdate ? "warning" : "future"}>{row.awaitingUpdate ? "Venceu · aguardando atualização" : "Futura conhecida"}</span></td>
-            <td><div className="row">{correction(row, true)}<CardExpenseButton accountId={row.accountId} statementId={row.id} className="icon-button" label={`Adicionar gasto na fatura ${row.accountName} de ${day(row.dueDate)}`}><Plus size={16}/></CardExpenseButton></div></td>
+            <td><div className="row">{correction(row, true)}<FinanceWriteOnly><CardExpenseButton accountId={row.accountId} statementId={row.id} className="icon-button" label={`Adicionar gasto na fatura ${row.accountName} de ${day(row.dueDate)}`}><Plus size={16}/></CardExpenseButton></FinanceWriteOnly></div></td>
           </tr>)}
           {s.forecasts.map((row) => {
             const overlapped = row.overlapsStatementId ? byId.get(row.overlapsStatementId) : undefined;
@@ -229,8 +234,8 @@ export default async function CardStatementsPage() {
     </>}
 
     {s.carried.length > 0 && <section className="panel stack"><h2>Histórico com saldo carregado</h2><p className="muted">O restante destas faturas já está na fatura seguinte. Ele não é somado outra vez à dívida atual nem aos vencimentos do calendário.</p>{s.carried.map(row => <div className="list-item" key={row.id}><div><strong>{row.accountName} · {month(row.referenceMonth)}</strong><p>Total original {money(row.declaredCents ?? row.amountCents)} · pagamento {money(row.paidCents || 0)} · saldo {money(row.amountCents)}{provenance(row)}</p></div><span className="row">{payment(row)}{undo(row)}<a href={`#fatura-${row.rolledIntoStatementId}`}>Ver fatura que inclui este saldo →</a></span></div>)}</section>}
-    <section id="importar"><CardStatementImport/></section>
-    <CardExpenseDialog cards={positions.map(({ id, name, institution }) => ({ id, name, institution }))} categories={categories} today={today}
-      statements={rows.map(({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents }) => ({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents: detailedCents ?? 0 }))}/>
+    <section id="importar"><FinanceWriteOnly><CardStatementImport/></FinanceWriteOnly></section>
+    <FinanceWriteOnly><CardExpenseDialog cards={positions.map(({ id, name, institution }) => ({ id, name, institution }))} categories={categories} today={today}
+      statements={rows.map(({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents }) => ({ id, accountId, kind, status, dueDate, closingDate, closingDay, referenceMonth, amountCents, detailedCents: detailedCents ?? 0 }))}/></FinanceWriteOnly>
   </div></FinancePrivacyBoundary>;
 }

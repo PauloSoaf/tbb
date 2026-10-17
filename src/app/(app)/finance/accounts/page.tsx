@@ -1,3 +1,4 @@
+import { financePageAccess } from "@/features/finance/finance-page-access";
 import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import Link from "next/link";
 import { Plus } from "lucide-react";
@@ -15,13 +16,15 @@ import { describeProvenance } from "@/features/finance/statement-provenance";
 import { money } from "@/features/finance/money";
 import { dayKey, formatDay } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceContext } from "@/lib/workspace";
 import { isUnassignedAccount } from "@/features/finance/unassigned-account";
 import { groupBankAccounts } from "@/features/finance/bank-accounts";
 import { AccountBalanceForm } from "@/features/finance/AccountBalanceForm";
+import { BalanceSyncForm } from "@/features/finance/BalanceSyncForm";
+import { QuickTransferForm } from "@/features/finance/QuickTransferForm";
+import { CASH_TYPES } from "@/features/finance/balance-sync";
 
 export default async function AccountsPage() {
-  const c = await getWorkspaceContext();
+  const c = await financePageAccess();
   const today = dayKey(new Date(), c.workspace.timezone);
   const [s, categories, statementRows] = await Promise.all([
     financeSummary(c.workspaceId, today),
@@ -29,10 +32,11 @@ export default async function AccountsPage() {
     cardStatementRows(c),
   ]);
   const cards = new Map((await creditCardPositions(c.workspaceId, today, statementRows)).map((card) => [card.id, card]));
+  const cashAccounts = s.accounts.filter((a) => !isUnassignedAccount(a) && CASH_TYPES.includes(a.type)).map(({ id, name, type, institution, balanceCents }) => ({ id, name, type, institution, balanceCents }));
   const day = (value: string) => formatDay(value, c.workspace.locale, { day: "2-digit", month: "2-digit", year: "numeric" });
 
-  return <FinancePrivacyBoundary><div className="stack">
-    <PageHeader eyebrow="MONEY · ACCOUNTS" title="Onde seu dinheiro vive." description="Conta, cofrinhos e cartão juntos por banco. Saldo é seu dinheiro; limite é crédito disponível."><Modal title="Criar conta" trigger={<><Plus size={15}/>Nova conta</>}><AccountForm/></Modal></PageHeader>
+  return <FinancePrivacyBoundary canWrite={c.canWrite}><div className="stack">
+    <PageHeader eyebrow="MONEY · ACCOUNTS" title="Onde seu dinheiro vive." description="Conta, cofrinhos e cartão juntos por banco. Saldo é seu dinheiro; limite é crédito disponível."><Modal title="Atualizar saldos" trigger="Atualizar saldos" triggerClassName="button"><BalanceSyncForm accounts={cashAccounts}/></Modal><Modal title="Transferir entre minhas contas" trigger="Transferir"><QuickTransferForm accounts={cashAccounts} today={today}/></Modal><Modal title="Criar conta" trigger={<><Plus size={15}/>Nova conta</>}><AccountForm/></Modal></PageHeader>
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{groupBankAccounts(s.accounts).map((bank) => <article className="panel stack bank-account-panel" key={bank.id} id={`banco-${bank.id}`}>
       <div className="account-card-title"><BankBadge institution={bank.institution} name={bank.name}/><div><h2>{bank.name}</h2><p className="muted">Seu dinheiro e seus cartões</p></div></div>
       <div className="bank-balances"><div><small>Saldo da conta · débito</small><strong>{bank.hasCash ? money(bank.cashCents) : "Não informado"}</strong></div><div><small>Cofrinhos e poupança</small><strong>{bank.accounts.some((a) => a.type === "SAVINGS") ? money(bank.reserveCents) : "Não cadastrado"}</strong></div></div>

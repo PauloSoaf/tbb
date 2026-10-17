@@ -1,9 +1,15 @@
+import { financePageAccess } from "@/features/finance/finance-page-access";
 import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
-import { Plus } from "lucide-react";
-import { PageHeader, EmptyState } from "@/components/ui/PageHeader";
-import { Modal } from "@/components/ui/Modal";
-import { SavingsForm } from "@/features/finance/forms";
-import { money } from "@/features/finance/money";
+import { FutureGoals } from "@/features/finance/planning/FutureGoals";
+import { dayKey } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceContext } from "@/lib/workspace";
-export default async function SavingsPage(){const c=await getWorkspaceContext();const [goals,accounts]=await Promise.all([prisma.savingsGoal.findMany({where:{workspaceId:c.workspaceId},include:{linkedAccount:true},orderBy:{createdAt:"desc"}}),prisma.account.findMany({where:{workspaceId:c.workspaceId,isArchived:false},select:{id:true,name:true}})]);return <FinancePrivacyBoundary><div className="stack"><PageHeader eyebrow="MONEY · SAVINGS" title="Dê um destino ao que você guarda." description="Metas explícitas deixam o progresso visível."><Modal title="Nova meta financeira" trigger={<><Plus size={15}/>Nova meta</>}><SavingsForm accounts={accounts}/></Modal></PageHeader><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{goals.map(goal=>{const pct=Math.min(100,Math.round(goal.currentAmountCents/goal.targetAmountCents*100));return <article className="panel stack" key={goal.id}><div className="row justify-between"><span className="badge">{goal.status}</span><strong>{pct}%</strong></div><h2>{goal.name}</h2><p>{money(goal.currentAmountCents)} de {money(goal.targetAmountCents)}</p><progress max={100} value={pct}/><small className="muted">{goal.linkedAccount?.name||"Progresso manual"}{goal.targetDate?` · alvo ${goal.targetDate.toISOString().slice(0,10)}`:""}</small></article>})}{!goals.length&&<div className="panel"><EmptyState title="Crie uma reserva com propósito" description="Informe o alvo e atualize o progresso conforme guardar."/></div>}</div></div></FinancePrivacyBoundary>}
+
+export default async function SavingsPage() {
+  const context = await financePageAccess(), today = dayKey(new Date(), context.workspace.timezone);
+  const [goals, accounts, debts] = await Promise.all([
+    prisma.savingsGoal.findMany({ where: { workspaceId: context.workspaceId }, include: { contributions: { select: { amountCents: true, date: true, kind: true }, orderBy: { date: "desc" } } }, orderBy: [{ priority: "asc" }, { targetDate: "asc" }] }),
+    prisma.account.findMany({ where: { workspaceId: context.workspaceId, isArchived: false, type: { in: ["CHECKING", "SAVINGS", "CASH", "DIGITAL_WALLET"] } }, select: { id: true, name: true, type: true } }),
+    prisma.debt.findMany({ where: { workspaceId: context.workspaceId }, select: { id: true, name: true } }),
+  ]);
+  return <FinancePrivacyBoundary canWrite={context.canWrite}><FutureGoals today={today} accounts={accounts} debts={debts} goals={goals.map(row => ({ ...row, targetDate: row.targetDate?.toISOString().slice(0, 10) ?? null, contributions: row.contributions.map(contribution => ({ ...contribution, date: contribution.date.toISOString().slice(0, 10) })) }))}/></FinancePrivacyBoundary>;
+}

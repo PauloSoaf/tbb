@@ -2,6 +2,13 @@ import type { Prisma, TransactionType } from "@prisma/client";
 
 export type TransactionSearchParams = { q?: string; account?: string; category?: string; type?: string; source?: string; page?: string };
 const TYPES: readonly TransactionType[] = ["EXPENSE", "INCOME", "REFUND", "TRANSFER", "ADJUSTMENT"];
+export const TRANSACTION_PAGE_SIZE = 100;
+export const MAX_TRANSACTION_PAGE = 1000;
+export function transactionPage(value?: string): number {
+  if (!value || !/^[1-9]\d*$/.test(value)) return 1;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? Math.min(parsed, MAX_TRANSACTION_PAGE) : 1;
+}
 
 /** Where-clause of the transactions page. Always scoped to the session's workspace; the text search
  * also looks into the optional note, so a remembered "dividido com Alexandre" finds the expense. */

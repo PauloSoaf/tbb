@@ -84,6 +84,10 @@ model Workspace {
   financialSnapshots            FinancialSnapshot[]
   loanComparisons               LoanComparison[]
   personalAssets                PersonalAsset[]
+  monthlyFinancialPlans         MonthlyFinancialPlan[]
+  budgetTransactionReviews      BudgetTransactionReview[]
+  savingsContributions          SavingsContribution[]
+  financePlanningReviews        FinancePlanningReview[]
   investmentAccounts            InvestmentAccount[]
   investmentAssets              InvestmentAsset[]
   investmentPositions           InvestmentPosition[]
@@ -543,6 +547,8 @@ model Account {
   statementPayments            CardStatementPayment[]
   financialSnapshots           FinancialSnapshot[]
   fixedExpensesOnCard          FixedExpense[]          @relation("FixedExpenseCard")
+  fixedPayments                FixedExpense[]          @relation("FixedExpensePaymentAccount")
+  variableForecasts            MonthlyFinancialPlan[]
 
   @@unique([id, workspaceId])
   @@index([workspaceId, isArchived])
@@ -603,6 +609,7 @@ model CardStatement {
   rolledIntoStatement   CardStatement?              @relation("StatementRollover", fields: [rolledIntoStatementId, accountId, workspaceId], references: [id, accountId, workspaceId], onDelete: NoAction, onUpdate: NoAction)
   rolledFrom            CardStatement[]             @relation("StatementRollover")
   amountIsOutstanding   Boolean                     @default(false)
+  spendingLimits        Budget[]
 
   @@unique([id, workspaceId])
   @@unique([id, accountId, workspaceId])
@@ -636,7 +643,7 @@ model FinanceCategory {
 }
 
 model FinanceTransaction {
-  id                     String                  @id @default(cuid())
+  id                     String                    @id @default(cuid())
   workspaceId            String
   accountId              String
   destinationAccountId   String?
@@ -645,53 +652,60 @@ model FinanceTransaction {
   description            String
   merchant               String?
   amountCents            Int
-  currency               String                  @default("BRL")
-  date                   DateTime                @db.Date
-  competenceDate         DateTime?               @db.Date
+  currency               String                    @default("BRL")
+  date                   DateTime                  @db.Date
+  competenceDate         DateTime?                 @db.Date
   installmentNumber      Int?
   installmentTotal       Int?
-  recurring              Boolean                 @default(false)
+  recurring              Boolean                   @default(false)
   recurringGroupId       String?
-  tags                   String[]                @default([])
+  tags                   String[]                  @default([])
   notes                  String?
-  source                 String                  @default("MANUAL")
+  source                 String                    @default("MANUAL")
   externalId             String?
   fingerprint            String?
   importBatchId          String?
   cardStatementId        String?
   statementDetailMode    StatementDetailMode?
-  revision               Int                     @default(0)
-  createdAt              DateTime                @default(now())
-  updatedAt              DateTime                @updatedAt
-  workspace              Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  account                Account                 @relation("OriginAccount", fields: [accountId], references: [id])
+  revision               Int                       @default(0)
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+  workspace              Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account                Account                   @relation("OriginAccount", fields: [accountId], references: [id])
   // Same workspace and same card as the statement, enforced by the composite key.
-  cardStatement          CardStatement?          @relation(fields: [cardStatementId, accountId, workspaceId], references: [id, accountId, workspaceId], onDelete: NoAction, onUpdate: NoAction)
-  destinationAccount     Account?                @relation("DestinationAccount", fields: [destinationAccountId], references: [id])
-  category               FinanceCategory?        @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  importBatch            ImportBatch?            @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
-  investmentTransactions InvestmentTransaction[] @relation("InvestmentFinanceTransaction")
-  investmentIncomeLinks  InvestmentIncome[]      @relation("InvestmentIncomeFinanceTransaction")
-  purchasedDate          DateTime?               @db.Date
-  postedDate             DateTime?               @db.Date
+  cardStatement          CardStatement?            @relation(fields: [cardStatementId, accountId, workspaceId], references: [id, accountId, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  destinationAccount     Account?                  @relation("DestinationAccount", fields: [destinationAccountId], references: [id])
+  category               FinanceCategory?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  importBatch            ImportBatch?              @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  investmentTransactions InvestmentTransaction[]   @relation("InvestmentFinanceTransaction")
+  investmentIncomeLinks  InvestmentIncome[]        @relation("InvestmentIncomeFinanceTransaction")
+  purchasedDate          DateTime?                 @db.Date
+  postedDate             DateTime?                 @db.Date
   occurredAt             DateTime?
   occurredTimezone       String?
-  dateBasis              String                  @default("MANUAL")
-  eventKind              String                  @default("PURCHASE")
-  isConsumption          Boolean                 @default(true)
+  dateBasis              String                    @default("MANUAL")
+  eventKind              String                    @default("PURCHASE")
+  isConsumption          Boolean                   @default(true)
   originalAmountCents    Int?
   originalCurrency       String?
   exchangeRate           String?
   subscriptionId         String?
   evidence               FinancialEvidence[]
-  subscription           Subscription?           @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  subscription           Subscription?             @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  fixedExpenseId         String?
+  fixedExpense           FixedExpense?             @relation(fields: [fixedExpenseId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  bankStatementPayment   CardStatementPayment?     @relation("BankStatementPayment")
+  budgetReviews          BudgetTransactionReview[]
+  goalContributions      SavingsContribution[]
 
   @@unique([workspaceId, fingerprint])
+  @@unique([id, workspaceId])
   @@index([workspaceId, date])
   @@index([workspaceId, accountId, date])
   @@index([workspaceId, importBatchId])
   @@index([workspaceId, cardStatementId])
   @@index([subscriptionId])
+  @@index([workspaceId, fixedExpenseId, date])
 }
 
 // How a card purchase relates to the statement it is detailed under: already part of the
@@ -702,25 +716,45 @@ enum StatementDetailMode {
 }
 
 model Budget {
-  id          String          @id @default(cuid())
-  workspaceId String
-  categoryId  String
-  period      String          @default("MONTHLY")
-  startDate   DateTime        @db.Date
-  endDate     DateTime        @db.Date
-  limitCents  Int
-  currency    String          @default("BRL")
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  category    FinanceCategory @relation(fields: [categoryId], references: [id])
+  id                 String                    @id @default(cuid())
+  workspaceId        String
+  categoryId         String?
+  period             String                    @default("MONTHLY")
+  startDate          DateTime                  @db.Date
+  endDate            DateTime                  @db.Date
+  limitCents         Int
+  currency           String                    @default("BRL")
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  workspace          Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category           FinanceCategory?          @relation(fields: [categoryId], references: [id])
+  kind               String                    @default("CATEGORY_BUDGET")
+  name               String?
+  scope              String                    @default("CATEGORY")
+  filterAccountIds   String[]                  @default([])
+  filterCategoryIds  String[]                  @default([])
+  excludeFixed       Boolean                   @default(true)
+  statementId        String?
+  statement          CardStatement?            @relation(fields: [statementId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  baselineAt         DateTime?
+  baselineDate       DateTime?                 @db.Date
+  timezone           String                    @default("America/Manaus")
+  recurring          Boolean                   @default(false)
+  status             String                    @default("ACTIVE")
+  notes              String?
+  version            Int                       @default(1)
+  transactionReviews BudgetTransactionReview[]
 
+  @@unique([id, workspaceId])
   @@unique([workspaceId, categoryId, startDate, endDate])
+  @@index([workspaceId, kind, status, startDate, endDate])
 }
 
 model Subscription {
   id                   String               @id @default(cuid())
   workspaceId          String
+  fixedExpenseId       String?
+  fixedExpense         FixedExpense?        @relation(fields: [fixedExpenseId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
   name                 String
   merchant             String?
   amountCents          Int
@@ -766,26 +800,39 @@ model Debt {
   updatedAt             DateTime        @updatedAt
   workspace             Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   personalAssets        PersonalAsset[]
+  futureGoals           SavingsGoal[]
 
+  @@unique([id, workspaceId])
   @@index([workspaceId, status])
 }
 
 model SavingsGoal {
-  id                 String               @id @default(cuid())
-  workspaceId        String
-  name               String
-  targetAmountCents  Int
-  currentAmountCents Int                  @default(0)
-  currency           String               @default("BRL")
-  targetDate         DateTime?            @db.Date
-  linkedAccountId    String?
-  status             String               @default("ACTIVE")
-  createdAt          DateTime             @default(now())
-  updatedAt          DateTime             @updatedAt
-  workspace          Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  linkedAccount      Account?             @relation(fields: [linkedAccountId], references: [id], onDelete: SetNull)
-  investmentLinks    InvestmentGoalLink[]
+  id                       String                @id @default(cuid())
+  workspaceId              String
+  name                     String
+  targetAmountCents        Int
+  currentAmountCents       Int                   @default(0)
+  currency                 String                @default("BRL")
+  targetDate               DateTime?             @db.Date
+  linkedAccountId          String?
+  status                   String                @default("ACTIVE")
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+  workspace                Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  linkedAccount            Account?              @relation(fields: [linkedAccountId], references: [id], onDelete: SetNull)
+  investmentLinks          InvestmentGoalLink[]
+  kind                     String                @default("OTHER")
+  contributionFrequency    String                @default("MONTHLY")
+  monthlyContributionCents Int?
+  priority                 Int                   @default(2)
+  notes                    String?
+  recurrence               String                @default("NONE")
+  debtId                   String?
+  debt                     Debt?                 @relation(fields: [debtId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  version                  Int                   @default(1)
+  contributions            SavingsContribution[]
 
+  @@unique([id, workspaceId])
   @@index([workspaceId, status])
 }
 
@@ -1356,22 +1403,38 @@ model FinancePlan {
 }
 
 model FixedExpense {
-  id            String    @id @default(cuid())
-  workspaceId   String
-  name          String
-  amountCents   Int
-  dueDay        Int?
-  notes         String?
-  isActive      Boolean   @default(true)
+  id                 String                  @id @default(cuid())
+  workspaceId        String
+  name               String
+  amountCents        Int
+  dueDay             Int?
+  notes              String?
+  isActive           Boolean                 @default(true)
   // Last day the monthly expense is expected; null means it has no end.
-  endsOn        DateTime? @db.Date
+  endsOn             DateTime?               @db.Date
   // Credit card the expense is charged to: it lands in that card statement, so plans net it out of the bill.
-  cardAccountId String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  cardAccount   Account?  @relation("FixedExpenseCard", fields: [cardAccountId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  cardAccountId      String?
+  startsOn           DateTime?               @db.Date
+  paymentMethod      String                  @default("UNKNOWN")
+  paymentAccountId   String?
+  paymentAccount     Account?                @relation("FixedExpensePaymentAccount", fields: [paymentAccountId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  beneficiary        String?
+  pixKeyEncrypted    String?
+  confirmationStatus String                  @default("CONFIRMED")
+  amountIsEstimate   Boolean                 @default(false)
+  expectedMinCents   Int?
+  expectedMaxCents   Int?
+  safetyMarginCents  Int                     @default(0)
+  version            Int                     @default(1)
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  workspace          Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  cardAccount        Account?                @relation("FixedExpenseCard", fields: [cardAccountId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  transactions       FinanceTransaction[]
+  subscriptions      Subscription[]
+  reviews            FinancePlanningReview[]
 
+  @@unique([id, workspaceId])
   @@index([workspaceId, isActive])
   @@index([cardAccountId, workspaceId])
 }
@@ -1477,26 +1540,31 @@ model FinancialSnapshot {
 
 // Issuer payment evidence changes the liability; never salary or fabricated cash movement.
 model CardStatementPayment {
-  id              String              @id @default(cuid())
-  workspaceId     String
-  accountId       String
-  cardStatementId String?
-  fingerprint     String
-  amountCents     Int
+  id                 String              @id @default(cuid())
+  workspaceId        String
+  accountId          String
+  cardStatementId    String?
+  fingerprint        String
+  amountCents        Int
   // Null only for payments the user declared without knowing the exact day; documents always carry one.
-  date            DateTime?           @db.Date
+  date               DateTime?           @db.Date
   // DOCUMENT: read from a bank document. MANUAL_VERIFIED: declared by the owner and confirmed in the app.
-  origin          String              @default("DOCUMENT")
-  sourceId        String
-  locator         String
-  importBatchId   String?
-  createdAt       DateTime            @default(now())
-  evidence        FinancialEvidence[]
-  workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  account         Account             @relation(fields: [accountId, workspaceId], references: [id, workspaceId], onDelete: NoAction)
-  cardStatement   CardStatement?      @relation(fields: [cardStatementId, accountId, workspaceId], references: [id, accountId, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  origin             String              @default("DOCUMENT")
+  bankTransactionId  String?             @unique
+  bankTransaction    FinanceTransaction? @relation("BankStatementPayment", fields: [bankTransactionId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  // Historical rows stay unknown; new payments explicitly choose how the bank side is reconciled.
+  bankReconciliation String              @default("LEGACY_UNKNOWN")
+  sourceId           String
+  locator            String
+  importBatchId      String?
+  createdAt          DateTime            @default(now())
+  evidence           FinancialEvidence[]
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account            Account             @relation(fields: [accountId, workspaceId], references: [id, workspaceId], onDelete: NoAction)
+  cardStatement      CardStatement?      @relation(fields: [cardStatementId, accountId, workspaceId], references: [id, accountId, workspaceId], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([workspaceId, fingerprint])
+  @@unique([bankTransactionId, workspaceId])
   @@index([cardStatementId, accountId, workspaceId])
   @@index([workspaceId, accountId, date])
   @@index([importBatchId])
@@ -1516,6 +1584,88 @@ model LoanComparison {
   workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, updatedAt])
+}
+
+// Month overrides are plans, never ledger entries. Null means unknown or use the default, not zero.
+model MonthlyFinancialPlan {
+  id                      String    @id @default(cuid())
+  workspaceId             String
+  month                   String
+  incomeOverrideCents     Int?
+  extraIncomeCents        Int       @default(0)
+  extraIncomeStatus       String    @default("EXPECTED")
+  variableBudgetCents     Int?
+  variableCardAccountId   String?
+  variableCardAccount     Account?  @relation(fields: [variableCardAccountId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  otherOutflowCents       Int       @default(0)
+  otherOutflowDescription String?
+  notes                   String?
+  version                 Int       @default(1)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, month])
+}
+
+// Known-at-baseline rows and explicit decisions on uncertain imports. No financial record is copied.
+model BudgetTransactionReview {
+  id            String             @id @default(cuid())
+  workspaceId   String
+  budgetId      String
+  transactionId String
+  decision      String
+  reason        String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  budget        Budget             @relation(fields: [budgetId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  transaction   FinanceTransaction @relation(fields: [transactionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([budgetId, transactionId])
+  @@index([workspaceId, budgetId, decision])
+}
+
+// An allocation earmarks existing money; only an explicitly confirmed transfer/payment touches the ledger.
+model SavingsContribution {
+  id            String              @id @default(cuid())
+  workspaceId   String
+  goalId        String
+  transactionId String?
+  amountCents   Int
+  date          DateTime            @db.Date
+  kind          String              @default("ALLOCATION")
+  fingerprint   String
+  createdAt     DateTime            @default(now())
+  workspace     Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  goal          SavingsGoal         @relation(fields: [goalId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  transaction   FinanceTransaction? @relation(fields: [transactionId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([workspaceId, fingerprint])
+  @@index([workspaceId, goalId, date])
+}
+
+// Review decisions and unresolved obligations; a pending issue has no financial effect.
+model FinancePlanningReview {
+  id             String        @id @default(cuid())
+  workspaceId    String
+  fingerprint    String
+  subjectKind    String
+  subjectId      String?
+  fixedExpenseId String?
+  title          String
+  status         String        @default("PENDING")
+  confidence     String        @default("REVIEW")
+  notes          String?
+  metadata       Json?
+  version        Int           @default(1)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fixedExpense   FixedExpense? @relation(fields: [fixedExpenseId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([workspaceId, fingerprint])
+  @@index([workspaceId, status])
 }
 
 enum ApplicationStatus {

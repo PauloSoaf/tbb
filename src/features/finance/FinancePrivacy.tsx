@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Eye, EyeOff } from "lucide-react";
 import { AppTooltip } from "@/components/ui/AppTooltip";
 import { useI18n } from "@/lib/i18n/I18nContext";
+import { FinanceWriteProvider } from "./FinanceWriteAccess";
 
 const PrivacyContext = createContext({ enabled: false, toggle: () => {} });
 const rootsSelector = "#main-content, dialog[open], [role=dialog], .modal-backdrop, .modal-overlay, [role=tooltip], [class*=text-chart-tooltip], .floating-calculator-window";
@@ -24,9 +25,9 @@ export function useFinancePrivacyBoundary() {
 }
 
 /** Wrap the resolved server page, so streamed RSC content is not scanned before React claims it. */
-export function FinancePrivacyBoundary({ children }: { children: ReactNode }) {
+export function FinancePrivacyBoundary({ children, canWrite = true }: { children: ReactNode; canWrite?: boolean }) {
   const boundary = useFinancePrivacyBoundary();
-  return <section {...boundary} className="finance-privacy-boundary">{children}</section>;
+  return <FinanceWriteProvider canWrite={canWrite}><section {...boundary} className="finance-privacy-boundary">{children}</section></FinanceWriteProvider>;
 }
 
 /** Visual privacy for the financial routes, including portals. Attributes leave React's text nodes intact.

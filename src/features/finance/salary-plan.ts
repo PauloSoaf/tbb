@@ -11,7 +11,7 @@ export function monthKeys(today: string, count = PLAN_MONTHS): string[] {
 }
 
 export type StatementLite = Pick<StatementRow, "id" | "accountId" | "accountName" | "kind" | "status" | "amountCents" | "dueDate" | "paidAt" | "rolledIntoStatementId"> & {
-  payments?: { amountCents: number; date: string | null }[];
+  payments?: { amountCents: number; date: string | null; bankReconciliation?: string }[];
 };
 
 const monthOf = (day: string | null | undefined) => (day ? day.slice(0, 7) : null);
@@ -71,6 +71,10 @@ export function variableOutsideStatements(input: {
 
 /** Everything one month of the plan needs, as plain data the browser can recompute from. */
 export type MonthPlan = {
+  cashItems?: FixedItem[];
+  additionalCommitments?: { key: string; kind: "RESERVE" | "PLANNED"; label: string; cents: number }[];
+  incomeKnown?: boolean;
+  planningIssues?: string[];
   month: string;
   incomeCents: number;
   items: FixedItem[];
@@ -81,7 +85,7 @@ export type MonthPlan = {
 };
 export type SalaryPlanView = { months: MonthPlan[]; canSeeBills: boolean; excludedDebtMinimumsCents: number; openBillsCents?: number; openBillsCount?: number; undatedBillsCount?: number };
 
-type FixedBillPurchase = { id: string; accountId: string; cardStatementId: string | null; amountCents: number; description: string; merchant: string | null; subscriptionId: string | null };
+type FixedBillPurchase = { id: string; accountId: string; cardStatementId: string | null; amountCents: number; description: string; merchant: string | null; subscriptionId: string | null; fixedExpenseId?: string | null };
 
 /** Only a linked purchase proves that a fixed commitment is already in a bill. Planned card spending and
  * future subscription estimates stay additional until there is evidence. Each purchase cent is used once. */
@@ -93,9 +97,10 @@ export function fixedBillCoverage(items: FixedItem[], bills: BillGroup[], purcha
     if (item.cardId) for (const row of purchases) {
       if (row.accountId !== item.cardId || !remaining.has(row.id)) continue;
       const sameSubscription = item.kind === "SUBSCRIPTION" && item.id && item.id === row.subscriptionId;
+      const sameFixed = item.kind === "FIXED" && item.id && item.id === row.fixedExpenseId;
       const key = fixedExpenseKey(item.name);
       const sameName = key && [fixedExpenseKey(row.description), fixedExpenseKey(row.merchant)].includes(key);
-      if (!sameSubscription && !sameName) continue;
+      if (!sameSubscription && !sameFixed && !sameName) continue;
       const used = Math.min(Math.max(0, item.cents - included), remaining.get(row.id)!);
       included += used; remaining.set(row.id, remaining.get(row.id)! - used);
     }
@@ -108,7 +113,7 @@ export function fixedBillCoverage(items: FixedItem[], bills: BillGroup[], purcha
 export function allocateMonth(plan: MonthPlan, options: { hiddenBills?: ReadonlySet<string>; maxItems?: number } = {}): { complete: SalaryAllocation; fixedOnly: SalaryAllocation; hiddenBills: BillGroup[] } {
   const hidden = options.hiddenBills ?? new Set<string>();
   return {
-    complete: buildSalaryAllocation({ incomeCents: plan.incomeCents, items: plan.items, variableCents: plan.variableCents, bills: plan.bills.filter((bill) => !hidden.has(bill.key)), maxItems: options.maxItems }),
+    complete: buildSalaryAllocation({ incomeCents: plan.incomeCents, items: plan.cashItems ?? plan.items, variableCents: plan.variableCents, bills: plan.bills.filter((bill) => !hidden.has(bill.key)), additionalCommitments: plan.additionalCommitments, maxItems: options.maxItems }),
     fixedOnly: buildSalaryAllocation({ incomeCents: plan.incomeCents, items: plan.items, variableCents: 0, maxItems: options.maxItems }),
     hiddenBills: plan.bills.filter((bill) => hidden.has(bill.key)),
   };

@@ -1,12 +1,12 @@
+import { financePageAccess } from "@/features/finance/finance-page-access";
 import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import { InvestmentCsvImport } from "@/features/investments/InvestmentCsvImport";
 import { InvestmentSubnav } from "@/features/investments/InvestmentSubnav";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { investmentShellData } from "@/features/investments/queries";
-import { getWorkspaceContext } from "@/lib/workspace";
 
 export default async function InvestmentImportPage() {
-  const context = await getWorkspaceContext();
+  const context = await financePageAccess();
   const shell = await investmentShellData(context.workspaceId);
-  return <FinancePrivacyBoundary><div className="investment-page"><PageHeader eyebrow="MONEY · INVESTMENTS" title="Importar carteira" description="Aceite formatos comuns, revise a prévia e preserve a origem de cada operação."/><InvestmentSubnav/><InvestmentCsvImport accounts={shell.accounts}/></div></FinancePrivacyBoundary>;
+  return <FinancePrivacyBoundary canWrite={context.canWrite}><div className="investment-page"><PageHeader eyebrow="MONEY · INVESTMENTS" title="Importar carteira" description="Aceite formatos comuns, revise a prévia e preserve a origem de cada operação."/><InvestmentSubnav/><InvestmentCsvImport accounts={shell.accounts}/></div></FinancePrivacyBoundary>;
 }

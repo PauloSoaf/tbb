@@ -22,7 +22,7 @@ export async function cardStatementRows(viewer: StatementViewer): Promise<Statem
   const [rows, linked, verifications] = await Promise.all([
     prisma.cardStatement.findMany({
       where: { workspaceId: viewer.workspaceId },
-      select: { id: true, createdAt: true, updatedAt: true, source: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, closingDate: true, closingDay: true, referenceMonth: true, paidAt: true, sourceAsOf: true, reconciliation: true, overlapsStatementId: true, notes: true, rolledIntoStatementId: true, amountIsOutstanding: true, payments: { select: { amountCents: true, date: true } }, account: { select: { name: true } } },
+      select: { id: true, createdAt: true, updatedAt: true, source: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, closingDate: true, closingDay: true, referenceMonth: true, paidAt: true, sourceAsOf: true, reconciliation: true, overlapsStatementId: true, notes: true, rolledIntoStatementId: true, amountIsOutstanding: true, payments: { select: { id: true, amountCents: true, date: true, bankReconciliation: true, bankTransactionId: true } }, account: { select: { name: true } } },
     }),
     prisma.financeTransaction.findMany({
       where: { workspaceId: viewer.workspaceId, cardStatementId: { not: null }, type: { in: ["EXPENSE", "REFUND"] } },
@@ -44,11 +44,11 @@ export async function cardStatementRows(viewer: StatementViewer): Promise<Statem
   return rows.map(({ account, updatedAt, createdAt, source, payments, ...row }) => {
     const extra = detail.get(row.id) ?? { addedCents: 0, detailedCents: 0, detailCount: 0 };
     // The same rule the payment dialog and the server use, so the number on screen is the number validated.
-    const { paidCents, effectiveCents } = outstandingOf({ status: row.status, declaredCents: row.amountCents, addedCents: extra.addedCents, amountIsOutstanding: row.amountIsOutstanding, sourceAsOf: dayOf(row.sourceAsOf), payments: (payments || []).map((item) => ({ amountCents: item.amountCents, date: dayOf(item.date) })) });
+    const { paidCents, effectiveCents } = outstandingOf({ status: row.status, declaredCents: row.amountCents, addedCents: extra.addedCents, amountIsOutstanding: row.amountIsOutstanding, sourceAsOf: dayOf(row.sourceAsOf), payments: (payments || []).map((item) => ({ id: item.id, amountCents: item.amountCents, date: dayOf(item.date) })) });
     return {
       ...row, ...extra, version: updatedAt?.toISOString() || "", provenance: buildProvenance({ createdAt, updatedAt, sourceAsOf: row.sourceAsOf, source }, verifiedAt.get(row.id)), accountName: account.name, dueDate: dayOf(row.dueDate), closingDate: dayOf(row.closingDate), paidAt: dayOf(row.paidAt),
       amountCents: effectiveCents, declaredCents: row.amountCents, paidCents,
-      payments: (payments || []).map((item) => ({ amountCents: item.amountCents, date: dayOf(item.date) })),
+      payments: (payments || []).map((item) => ({ id: item.id, amountCents: item.amountCents, date: dayOf(item.date), bankReconciliation: item.bankReconciliation, bankTransactionId: item.bankTransactionId })),
     };
   });
 }
@@ -59,16 +59,19 @@ export async function cardStatementOverview(viewer: StatementViewer, today: stri
 
 /** Every active credit card with its limit breakdown, computed once for all screens. Pass rows from
  * `cardStatementRows`: a viewer who cannot read statements gets the ledger-only view. */
-export async function creditCardPositions(workspaceId: string, today: string, statementRows: StatementRow[]) {
+type PositionAccount = { id: string; name: string; institution: string | null; creditLimitCents: number | null; closingDay: number | null; dueDay: number | null; initialBalanceCents: number };
+type PositionMovement = { accountId: string; type: string; _sum: { amountCents: number | null } };
+type PositionIncoming = { destinationAccountId: string | null; _sum: { amountCents: number | null } };
+export async function creditCardPositions(workspaceId: string, today: string, statementRows: StatementRow[], seed: { accounts?: PositionAccount[]; originThroughToday?: PositionMovement[]; incomingThroughToday?: PositionIncoming[] } = {}) {
   const onCards = { workspaceId, source: { not: "QUICK_INCOME" }, account: { type: "CREDIT_CARD" as const, isArchived: false } };
   const [cards, origin, incoming, future, unlinked] = await Promise.all([
-    prisma.account.findMany({
+    seed.accounts ? Promise.resolve(seed.accounts) : prisma.account.findMany({
       where: { workspaceId, type: "CREDIT_CARD", isArchived: false },
       select: { id: true, name: true, institution: true, creditLimitCents: true, closingDay: true, dueDay: true, initialBalanceCents: true },
       orderBy: { createdAt: "asc" },
     }),
-    prisma.financeTransaction.groupBy({ by: ["accountId", "type"], where: onCards, _sum: { amountCents: true } }),
-    prisma.financeTransaction.groupBy({ by: ["destinationAccountId"], where: { workspaceId, type: "TRANSFER", destinationAccount: { type: "CREDIT_CARD", isArchived: false } }, _sum: { amountCents: true } }),
+    seed.originThroughToday ? Promise.resolve(seed.originThroughToday) : prisma.financeTransaction.groupBy({ by: ["accountId", "type"], where: { ...onCards, date: { lt: dateKeyToUTC(addDays(today, 1)) } }, _sum: { amountCents: true } }),
+    seed.incomingThroughToday ? Promise.resolve(seed.incomingThroughToday) : prisma.financeTransaction.groupBy({ by: ["destinationAccountId"], where: { workspaceId, type: "TRANSFER", destinationAccount: { type: "CREDIT_CARD", isArchived: false }, date: { lt: dateKeyToUTC(addDays(today, 1)) } }, _sum: { amountCents: true } }),
     prisma.financeTransaction.groupBy({ by: ["accountId", "type"], where: { ...onCards, type: { in: ["EXPENSE", "REFUND"] }, date: { gte: dateKeyToUTC(addDays(today, 1)) } }, _sum: { amountCents: true } }),
     prisma.financeTransaction.findMany({
       where: { ...onCards, cardStatementId: null, type: { in: ["EXPENSE", "REFUND"] }, date: { gte: dateKeyToUTC(addDays(today, -400)) } },
@@ -81,7 +84,8 @@ export async function creditCardPositions(workspaceId: string, today: string, st
     const ledger: CardLedger = {
       balanceCents: account.initialBalanceCents
         + origin.filter((row) => row.accountId === account.id).reduce((sum, row) => sum + (credit(row.type) ? 1 : -1) * (row._sum.amountCents || 0), 0)
-        + (incoming.find((row) => row.destinationAccountId === account.id)?._sum.amountCents || 0),
+        + (incoming.find((row) => row.destinationAccountId === account.id)?._sum.amountCents || 0)
+        - future.filter((row) => row.accountId === account.id).reduce((sum, row) => sum + (row.type === "EXPENSE" ? 1 : -1) * (row._sum.amountCents || 0), 0),
       futureNetCents: future.filter((row) => row.accountId === account.id).reduce((sum, row) => sum + (row.type === "EXPENSE" ? 1 : -1) * (row._sum.amountCents || 0), 0),
       unlinked: unlinked.filter((row) => row.accountId === account.id).map((row) => ({ date: row.date.toISOString().slice(0, 10), type: row.type as "EXPENSE" | "REFUND", amountCents: row.amountCents })),
     };
@@ -143,7 +147,7 @@ export async function financeAnalytics(workspaceId:string,today:string){
     prisma.financeTransaction.groupBy({by:["date"],where:{workspaceId,type:"EXPENSE",isConsumption:true,date:range},_sum:{amountCents:true},orderBy:{date:"asc"}}),
     prisma.financeCategory.findMany({where:{workspaceId,isArchived:false},select:{id:true,name:true,color:true}}),
     prisma.account.findMany({where:{workspaceId,isArchived:false,type:"CREDIT_CARD"},select:{id:true,name:true,institution:true,creditLimitCents:true,dueDay:true,transactions:{where:{date:monthRange,isConsumption:true,type:{in:["EXPENSE","REFUND"]}},select:{type:true,amountCents:true}}},orderBy:{createdAt:"asc"}}),
-    prisma.budget.findMany({where:{workspaceId,startDate:{lte:todayDate},endDate:{gte:todayDate}},include:{category:{select:{name:true,color:true}}},orderBy:{limitCents:"desc"}}),
+    prisma.budget.findMany({where:{workspaceId,kind:"CATEGORY_BUDGET",startDate:{lte:todayDate},endDate:{gte:todayDate}},include:{category:{select:{name:true,color:true}}},orderBy:{limitCents:"desc"}}),
     prisma.subscription.findMany({where:{workspaceId,status:"ACTIVE"},select:{name:true,amountCents:true,nextChargeDate:true,billingCycle:true,customDays:true}}),
     prisma.debt.findMany({where:{workspaceId,status:"ACTIVE",minimumPaymentCents:{gt:0}},select:{name:true,minimumPaymentCents:true,dueDay:true}}),
   ]);
@@ -190,7 +194,7 @@ export async function financeAnalytics(workspaceId:string,today:string){
       const limit=account.creditLimitCents||0;
       return {name:account.name,institution:account.institution,spent:spent/100,available:Math.max(0,limit-spent)/100,limit:limit/100,usage:limit?Math.round(spent/limit*100):null,dueDay:account.dueDay};
     }),
-    budgets:budgets.map((budget,index)=>{const spent=budgetSpending[index]._sum.amountCents||0;return {category:budget.category.name,color:budget.category.color,spent:spent/100,remaining:Math.max(0,budget.limitCents-spent)/100,limit:budget.limitCents/100,usage:Math.round(spent/budget.limitCents*100)};}),
+    budgets:budgets.map((budget,index)=>{const spent=budgetSpending[index]._sum.amountCents||0;return {category:budget.category?.name || "",color:budget.category?.color || "var(--chart-1)",spent:spent/100,remaining:Math.max(0,budget.limitCents-spent)/100,limit:budget.limitCents/100,usage:Math.round(spent/budget.limitCents*100)};}),
     upcoming,
   };
 }

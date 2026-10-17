@@ -1,11 +1,14 @@
 "use client";
 import { useRef, useState, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
+import { useFinanceWriteAccess } from "@/features/finance/FinanceWriteAccess";
 export type ActionResult = { error?: string; success?: string };
 export function ActionForm({ action, children, className, resetOnSuccess = true }: {
   action: (data: FormData) => Promise<ActionResult>; children: ReactNode; className?: string; resetOnSuccess?: boolean;
 }) {
   const [error, setError] = useState(""); const [pending, startTransition] = useTransition(); const ref = useRef<HTMLFormElement>(null);
+  const canWrite = useFinanceWriteAccess();
+  if (!canWrite) return null;
   return <form ref={ref} className={className} action={(data) => {
     setError(""); startTransition(async () => {
       try { const result = await action(data); if (result.error) setError(result.error);

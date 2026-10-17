@@ -5,11 +5,13 @@ type RecurringExpense = {
   description: string;
   merchant: string | null;
   subscriptionId?: string | null;
+  fixedExpenseId?: string | null;
   /** Account the posting was made on; a credit card means it is part of that card's statement. */
   accountId?: string | null;
 };
 
 type ActiveSubscription = {
+  fixedExpenseId?: string | null;
   id?: string;
   name: string;
   merchant: string | null;
@@ -37,8 +39,11 @@ const normalized = fixedExpenseKey;
 export function calculateFixedExpenses(
   recurring: RecurringExpense[],
   subscriptions: ActiveSubscription[],
-  planned: { name: string; amountCents: number }[] = [],
+  planned: { id?: string; name: string; amountCents: number }[] = [],
 ) {
+  const plans = new Map(planned.filter(row => row.id).map(row => [row.id, row.name]));
+  recurring = recurring.map(row => row.fixedExpenseId && plans.has(row.fixedExpenseId) ? { ...row, description: plans.get(row.fixedExpenseId)!, merchant: null } : row);
+  subscriptions = subscriptions.map(row => row.fixedExpenseId && plans.has(row.fixedExpenseId) ? { ...row, name: plans.get(row.fixedExpenseId)!, merchant: null } : row);
   const recurringAmountCents = recurring.reduce((sum, item) => sum + item.amountCents, 0);
   const recurringNames = recurring.flatMap((item) => [normalized(item.description), normalized(item.merchant)]).filter(Boolean);
 
@@ -85,7 +90,7 @@ export type FixedItem = {
 export type PlannedFixed = { id?: string; name: string; amountCents: number; cardId?: string | null };
 
 /** A planned expense counts in a month up to and including the month of its end date; with no end date it never ends. */
-export const plannedActiveIn = <T extends { endsOn?: string | null }>(planned: T[], month: string): T[] => planned.filter((item) => !item.endsOn || item.endsOn.slice(0, 7) >= month);
+export const plannedActiveIn = <T extends { startsOn?: string | null; endsOn?: string | null }>(planned: T[], month: string): T[] => planned.filter((item) => (!item.startsOn || item.startsOn.slice(0, 7) <= month) && (!item.endsOn || item.endsOn.slice(0, 7) >= month));
 
 /**
  * The same universe as `calculateFixedExpenses`, itemised: every planned expense, every subscription not
@@ -102,6 +107,9 @@ export function fixedExpenseItems(
   planned: PlannedFixed[] = [],
   options: { cardIds?: ReadonlySet<string> } = {},
 ): FixedItem[] {
+  const plans = new Map(planned.filter(row => row.id).map(row => [row.id, row.name]));
+  recurring = recurring.map(row => row.fixedExpenseId && plans.has(row.fixedExpenseId) ? { ...row, description: plans.get(row.fixedExpenseId)!, merchant: null } : row);
+  subscriptions = subscriptions.map(row => row.fixedExpenseId && plans.has(row.fixedExpenseId) ? { ...row, name: plans.get(row.fixedExpenseId)!, merchant: null } : row);
   // The user's own link is trusted unless that card is known to be gone; an account found on a posting or a
   // subscription counts only when it is a known credit card.
   const explicitCard = (id?: string | null) => (id && (!options.cardIds || options.cardIds.has(id)) ? id : null);

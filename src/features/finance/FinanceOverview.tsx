@@ -1,5 +1,11 @@
 "use client";
 
+import { FinanceWriteOnly } from "@/features/finance/FinanceWriteAccess";
+import { Modal } from "@/components/ui/Modal";
+import { BalanceSyncForm } from "./BalanceSyncForm";
+import { QuickTransferForm } from "./QuickTransferForm";
+import { CASH_TYPES } from "./balance-sync";
+
 import Link from "next/link";
 import { personalAssetCopy } from "./personal-asset-copy";
 import NumberFlow from "@number-flow/react";
@@ -50,6 +56,7 @@ function percent(value: number, total: number) {
 export function FinanceOverview({ data, captureAccounts, calendar, calendarCategories, calendarCanWrite }: { data: FinanceOverviewData; captureAccounts: CaptureAccount[]; calendar: FinanceCalendarMonth; calendarCategories: FinanceCalendarCategory[]; calendarCanWrite: boolean }) {
   const t = useFinanceCopy();
   const { locale } = useI18n();
+  const cashAccounts = data.accounts.filter((account) => !account.unassigned && CASH_TYPES.includes(account.type)).map(({ id, name, type, institution, balanceCents }) => ({ id, name, type, institution, balanceCents }));
   const language = localeCode[locale];
   const currency = (cents: number) => new Intl.NumberFormat(language, { style: "currency", currency: "BRL", maximumFractionDigits: cents % 100 ? 2 : 0 }).format(cents / 100);
   const date = (day: string) => new Intl.DateTimeFormat(language, { day: "2-digit", month: "short", timeZone: "UTC" }).format(new Date(`${day}T00:00:00.000Z`)).replace(".", "");
@@ -103,7 +110,7 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
 
       <section id="contas" className="finance-accounts-grid has-calendar">
         <RevealOnScroll><article className="finance-overview-card finance-account-card">
-          <header className="finance-card-heading"><div><span className="finance-card-icon"><Landmark size={17}/></span><div><h2>{t("accountSummary")}</h2><p>{t("accountHint")}</p></div></div><Link href="/finance/accounts">{t("seeAll")}<ArrowRight size={14}/></Link></header>
+          <header className="finance-card-heading"><div><span className="finance-card-icon"><Landmark size={17}/></span><div><h2>{t("accountSummary")}</h2><p>{t("accountHint")}</p></div></div><span className="finance-card-actions"><Modal title="Atualizar saldos" trigger="Atualizar saldos" triggerClassName="finance-card-button"><BalanceSyncForm accounts={cashAccounts}/></Modal><Modal title="Transferir entre minhas contas" trigger="Transferir" triggerClassName="finance-card-button"><QuickTransferForm accounts={cashAccounts} today={data.today}/></Modal><Link href="/finance/accounts">{t("seeAll")}<ArrowRight size={14}/></Link></span></header>
           <div className="finance-account-list">{data.banks.slice(0, 6).map((bank) => <Link href={`/finance/accounts#banco-${bank.id}`} key={bank.id}><span className="finance-account-mark"><WalletCards size={16}/></span><span><strong>{bank.name}</strong><small>{bank.cardCount} cartão(ões) · Reservas {currency(bank.reserveCents)}</small><small>{bank.hasCash ? "Saldo para débito" : "Adicionar saldo da conta →"}</small></span><b data-negative={bank.cashCents < 0 || undefined}>{bank.hasCash ? currency(bank.cashCents) : "Não informado"}</b></Link>)}{!data.banks.length && <EmptyDashboard icon={Landmark} text={t("noCards")} href="/finance/accounts" linkText={t("configure")}/>} {data.accounts.some((account) => account.unassigned) && <Link href="/finance/transactions"><span className="finance-account-mark tone-warning"><AlertTriangle size={16}/></span><span><strong>{t("pendingLink")}</strong><small>{t("transactions")}</small></span><ArrowRight size={15}/></Link>}</div>
         </article></RevealOnScroll>
         <RevealOnScroll delay={.05}><article id="cartoes" className="finance-overview-card finance-card-overview">
@@ -125,7 +132,7 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
         <RevealOnScroll className="finance-usage-reveal" delay={.06}>
           <article className="finance-overview-card finance-income-usage">
             <header className="finance-card-heading"><div><span className="finance-card-icon tone-warning"><CircleDollarSign size={17}/></span><div><h2>{t("incomeUsage")} <AppTooltip content="Planejamento da renda prevista: gastos fixos mensais e despesas variáveis já registradas. Não soma o total das faturas nem parcelas futuras. Gasolina, cabelo, comida e diarista podem ser previstos mesmo se você pretende pagar no crédito. O que sobra aqui não é o saldo do banco."><button className="icon-button" type="button" aria-label="Como funciona o uso da renda">?</button></AppTooltip></h2><p>Fixos previstos e variáveis registrados em relação à renda prevista.</p></div></div></header>
-            <div className="finance-fixed-shortcut"><FixedExpensesDialog expenses={data.plannedFixed} cards={cardOptions} currentMonth={currentMonth}/></div>
+            <div className="finance-fixed-shortcut"><FixedExpensesDialog expenses={data.plannedFixed} paymentAccounts={captureAccounts.filter(account=>["CHECKING","SAVINGS","CASH","DIGITAL_WALLET"].includes(account.type||""))} cards={cardOptions} currentMonth={currentMonth}/></div>
             {metrics.incomeReferenceCents ? <>
               <div className="income-usage-score" data-danger={incomeUse >= 100 || undefined}><strong>{incomeUse}%</strong><span>da renda prevista comprometida</span></div>
               <FinanceIncomeUsageChart fixed={metrics.fixedCents / 100} variable={metrics.variableCents / 100} available={metrics.availableCents / 100} labels={{ fixed: "Fixos previstos", variable: t("variable"), available: "Sobra prevista" }}/>
@@ -173,7 +180,7 @@ export function FinanceOverview({ data, captureAccounts, calendar, calendarCateg
         })}</div> : <EmptyDashboard icon={ReceiptText} text={t("noTransactions")}/>}
       </section></RevealOnScroll>
 
-      <RevealOnScroll><section id="captura" className="finance-capture-overview"><NaturalLanguageCapture accounts={captureAccounts} today={data.today}/></section></RevealOnScroll>
+      <RevealOnScroll><section id="captura" className="finance-capture-overview"><FinanceWriteOnly><NaturalLanguageCapture accounts={captureAccounts} today={data.today}/></FinanceWriteOnly></section></RevealOnScroll>
     </main>
   </div>;
 }

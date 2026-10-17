@@ -7,6 +7,7 @@ import { Bot,Calculator,CalendarDays,Check,CheckCheck,FileSpreadsheet,Lightbulb,
 import { toast } from "sonner";
 import type { CapturedTransaction } from "@/features/finance/natural-language";
 import { FloatingCalculatorWindow } from "./FloatingCalculatorWindow";
+import { useFinanceWriteAccess } from "@/features/finance/FinanceWriteAccess";
 
 type Message={role:"user"|"assistant";text:string};
 type ProposedAction={kind:"transactions";transactions:CapturedTransaction[]}|{kind:"task";title:string;dueDate:string|null}|{kind:"goal";name:string;target:number;unit:string;targetDate:string|null};
@@ -23,6 +24,7 @@ const shortcuts=[
 function fallbackAnswer(path:string){return `Não consegui consultar os dados agora. Você continua no contexto de ${path}; tente novamente ou use as ferramentas rápidas.`}
 
 export function FloatingActionDock({workspaceId}:{workspaceId:string}){
+  const canWrite=useFinanceWriteAccess();
   const pathname=usePathname();
   const router=useRouter();
   const [assistantOpen,setAssistantOpen]=useState(false);
@@ -63,7 +65,7 @@ export function FloatingActionDock({workspaceId}:{workspaceId:string}){
   }
 
   async function confirmAction(){
-    if(!action||loading)return;
+    if(!action||loading||!canWrite)return;
     setLoading(true);
     try{
       const endpoint=action.kind==="transactions"?"/api/finance/capture":"/api/assistant/actions";
@@ -85,7 +87,7 @@ export function FloatingActionDock({workspaceId}:{workspaceId:string}){
     </div>
 
     <div className="floating-layer" data-open={assistantOpen}>
-      {assistantOpen&&<button className="floating-backdrop" aria-label="Fechar assistente" onClick={()=>setAssistantOpen(false)}/>}<aside className="floating-drawer" aria-hidden={!assistantOpen}><header><div className="row"><span className="drawer-icon"><Bot size={20}/></span><div><h2>Assistente TBB</h2><small>Consulta e ações com confirmação</small></div></div><button className="icon-button" onClick={()=>setAssistantOpen(false)} aria-label="Fechar"><X size={18}/></button></header><div className="assistant-prompts">{["uber 29 reais","adicione tarefa revisar currículo amanhã","crie uma meta ler 12 livros"].map(prompt=><button key={prompt} onClick={()=>setInput(prompt)}>{prompt}</button>)}</div><div className="assistant-messages">{messages.map((message,index)=><p key={index} data-role={message.role}>{message.text}</p>)}{action&&<ActionPreview action={action} onConfirm={()=>void confirmAction()} onCancel={()=>setAction(null)} disabled={loading}/>} {loading&&<p className="assistant-typing"><Loader2 className="nav-spinner" size={14}/> Processando…</p>}</div><form className="assistant-composer" onSubmit={event=>{event.preventDefault();void submit()}}><textarea value={input} onChange={event=>setInput(event.target.value)} placeholder="Converse ou peça uma ação…" rows={2}/><button className="button" aria-label="Enviar" disabled={loading}><Send size={16}/></button></form></aside>
+      {assistantOpen&&<button className="floating-backdrop" aria-label="Fechar assistente" onClick={()=>setAssistantOpen(false)}/>}<aside className="floating-drawer" aria-hidden={!assistantOpen}><header><div className="row"><span className="drawer-icon"><Bot size={20}/></span><div><h2>Assistente TBB</h2><small>Consulta e ações com confirmação</small></div></div><button className="icon-button" onClick={()=>setAssistantOpen(false)} aria-label="Fechar"><X size={18}/></button></header><div className="assistant-prompts">{["uber 29 reais","adicione tarefa revisar currículo amanhã","crie uma meta ler 12 livros"].map(prompt=><button key={prompt} onClick={()=>setInput(prompt)}>{prompt}</button>)}</div><div className="assistant-messages">{messages.map((message,index)=><p key={index} data-role={message.role}>{message.text}</p>)}{action&&canWrite&&<ActionPreview action={action} onConfirm={()=>void confirmAction()} onCancel={()=>setAction(null)} disabled={loading}/>} {loading&&<p className="assistant-typing"><Loader2 className="nav-spinner" size={14}/> Processando…</p>}</div><form className="assistant-composer" onSubmit={event=>{event.preventDefault();void submit()}}><textarea value={input} onChange={event=>setInput(event.target.value)} placeholder="Converse ou peça uma ação…" rows={2}/><button className="button" aria-label="Enviar" disabled={loading}><Send size={16}/></button></form></aside>
     </div>
 
     <div className="floating-layer" data-open={toolsOpen}>

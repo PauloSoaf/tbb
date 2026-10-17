@@ -14,5 +14,5 @@ export default async function AssetsPage() {
     personalAssetRows(ctx.workspaceId, true),
     prisma.debt.findMany({ where: { workspaceId: ctx.workspaceId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
-  return <FinancePrivacyBoundary><PersonalAssetsPage assets={assets} debts={debts} canWrite={canWrite} today={dayKey(new Date(), ctx.workspace.timezone)}/></FinancePrivacyBoundary>;
+  return <FinancePrivacyBoundary canWrite={canWrite}><PersonalAssetsPage assets={assets} debts={debts} canWrite={canWrite} today={dayKey(new Date(), ctx.workspace.timezone)}/></FinancePrivacyBoundary>;
 }

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
     },
   };
 });
+vi.mock("../planning/salary-planning",()=>({addSalaryPlanning:async (_workspaceId:unknown,_today:unknown,salary:unknown)=>salary}));
 vi.mock("@/lib/prisma", () => ({ prisma: mocks.db }));
 vi.mock("server-only", () => ({}));
 import { financeOverview } from "../overview-query";

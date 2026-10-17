@@ -9,9 +9,10 @@ const mocks=vi.hoisted(()=>{
     financialSnapshot:{groupBy:findMany()},activityEvent:{findMany:findMany()},
   }};
 });
+vi.mock("../planning/salary-planning",()=>({addSalaryPlanning:async (_workspaceId:unknown,_today:unknown,salary:unknown)=>salary}));
 vi.mock("@/lib/prisma",()=>({prisma:mocks.db}));
 vi.mock("server-only",()=>({}));
-vi.mock("@/lib/workspace",()=>({getWorkspaceContext:mocks.context}));
+vi.mock("@/lib/workspace",()=>({getWorkspaceContext:mocks.context,requirePermission:mocks.context,AuthorizationError:class extends Error{}}));
 vi.mock("@/components/TbbCharts",()=>({CardStatementTimelineChart:()=>null}));
 vi.mock("@/components/ui/ActionForm",()=>({ActionForm:()=>null}));
 vi.mock("../CardExpenseDialog",()=>({CardExpenseButton:()=>null,CardExpenseDialog:()=>null}));

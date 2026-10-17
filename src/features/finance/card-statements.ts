@@ -361,7 +361,7 @@ export type StatementRow = {
   version?: string; declaredCents?: number; addedCents?: number; detailedCents?: number; detailCount?: number;
   paidCents?: number; rolledIntoStatementId?: string | null; amountIsOutstanding?: boolean;
   /** Payments registered on the bill; a payment without a date keeps `date` null. */
-  payments?: { amountCents: number; date: string | null }[];
+  payments?: { id?: string; amountCents: number; date: string | null; bankReconciliation?: string; bankTransactionId?: string | null }[];
   /** Where the numbers come from and when; see statement-provenance.ts. */
   provenance?: StatementProvenance;
 };

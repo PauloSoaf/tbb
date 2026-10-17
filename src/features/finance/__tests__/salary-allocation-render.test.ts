@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../actions", () => ({ saveFixedExpense: vi.fn(), archiveFixedExpense: vi.fn() }));
-vi.mock("next/navigation", () => ({ usePathname: () => "/finance" }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/finance", useSearchParams: () => new URLSearchParams() }));
 import { AllocationMembers, SalaryAllocationCard } from "../SalaryAllocationCard";
 import { buildSalaryAllocation } from "../salary-allocation";
 import type { FixedItem } from "../fixed-expenses";

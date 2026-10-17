@@ -3,7 +3,7 @@ import type { FixedItem, FixedItemKind } from "./fixed-expenses";
 /** Where the monthly income is planned to go. Integer cents end to end: the slices of a month with room to
  * spare add up to the income exactly, and percentages are basis points that always add up to 10 000.
  * A shortfall is reported as a number of its own: it is never a negative slice of the pie. */
-export type AllocationKind = FixedItemKind | "BILL" | "VARIABLE" | "FREE";
+export type AllocationKind = FixedItemKind | "BILL" | "VARIABLE" | "FREE" | "RESERVE" | "PLANNED";
 
 export type BillStatementLine = { id: string; dueDate: string | null; toPayCents: number; paidCents: number };
 /** What one card's statements ask of a month: what is still to be paid and what was already paid in it. */
@@ -53,6 +53,7 @@ export type SalaryAllocation = {
 };
 
 export const KIND_LABEL: Record<AllocationKind, string> = {
+  RESERVE: "Reservas para objetivos", PLANNED: "Despesas eventuais",
   FIXED: "Gastos fixos", SUBSCRIPTION: "Assinaturas", RECURRING: "Recorrentes já lançados", BILL: "Faturas de cartão", VARIABLE: "Variáveis do mês", FREE: "Sobra prevista",
 };
 
@@ -72,7 +73,7 @@ const positive = (value: number) => (Number.isFinite(value) && value > 0 ? Math.
 
 /** Bills keep their full value. A fixed expense is removed from its separate slice only to the extent that
  * linked purchase evidence proves it is already in those bills. A card assignment is a plan, not evidence. */
-export function buildSalaryAllocation(input: { incomeCents: number; items: FixedItem[]; variableCents: number; bills?: BillGroup[]; maxItems?: number }): SalaryAllocation {
+export function buildSalaryAllocation(input: { incomeCents: number; items: FixedItem[]; variableCents: number; bills?: BillGroup[]; maxItems?: number; additionalCommitments?: { key: string; kind: "RESERVE" | "PLANNED"; label: string; cents: number }[] }): SalaryAllocation {
   const income = positive(input.incomeCents);
   const variable = positive(input.variableCents);
   const items = input.items.filter((item) => positive(item.cents) > 0).map((item) => ({ ...item, cents: positive(item.cents) }));
@@ -96,7 +97,8 @@ export function buildSalaryAllocation(input: { incomeCents: number; items: Fixed
   const billsGross = bills.reduce((sum, bill) => sum + bill.grossCents, 0);
   const fixedOutside = separateItems.reduce((sum, item) => sum + item.cents, 0);
 
-  const commitments = fixedOutside + billsGross + variable;
+  const additional = (input.additionalCommitments ?? []).filter(row => positive(row.cents) > 0).map(row => ({ ...row, cents: positive(row.cents) }));
+  const commitments = fixedOutside + billsGross + variable + additional.reduce((sum, row) => sum + row.cents, 0);
   const free = Math.max(0, income - commitments);
   const deficit = Math.max(0, commitments - income);
   const base = Math.max(income, commitments);
@@ -115,13 +117,14 @@ export function buildSalaryAllocation(input: { incomeCents: number; items: Fixed
   if (tail.length) draft.push({ key: "other", kind: "FIXED", label: `Outros (${tail.length})`, cents: tail.reduce((sum, item) => sum + item.cents, 0), id: null, merged: tail.length, members: tail.map((item, index) => leaf(item, shown.length + index)) });
   for (const bill of bills) if (bill.grossCents > 0) draft.push({ key: `bill:${bill.key}`, kind: "BILL", label: bill.label, cents: bill.grossCents, id: bill.key, bill });
   if (variable) draft.push({ key: "variable", kind: "VARIABLE", label: KIND_LABEL.VARIABLE, cents: variable, id: null });
+  for (const row of additional) draft.push({ ...row, id: null });
   if (free) draft.push({ key: "free", kind: "FREE", label: KIND_LABEL.FREE, cents: free, id: null });
 
   const bp = shares(draft.map((slice) => slice.cents));
   const slices = draft.map((slice, index) => ({ ...slice, basisPoints: bp[index] }));
 
-  const kinds: AllocationKind[] = ["FIXED", "SUBSCRIPTION", "RECURRING", "BILL", "VARIABLE", "FREE"];
-  const unmerged = [...allFixed, ...draft.filter(slice => slice.kind === "BILL" || slice.kind === "VARIABLE" || slice.kind === "FREE")];
+  const kinds: AllocationKind[] = ["FIXED", "SUBSCRIPTION", "RECURRING", "BILL", "VARIABLE", "RESERVE", "PLANNED", "FREE"];
+  const unmerged = [...allFixed, ...draft.filter(slice => slice.kind === "BILL" || slice.kind === "VARIABLE" || slice.kind === "FREE" || slice.kind === "RESERVE" || slice.kind === "PLANNED")];
   const grouped = kinds.map((kind) => ({ key: `kind:${kind}`, kind, label: KIND_LABEL[kind], cents: unmerged.filter(slice => slice.kind === kind).reduce((sum, slice) => sum + slice.cents, 0), id: null, members: unmerged.filter(slice => slice.kind === kind).map(slice => ({ ...slice, basisPoints: base ? Math.round(slice.cents * 10_000 / base) : 0 })) })).filter((group) => group.cents > 0);
   const groupBp = shares(grouped.map((group) => group.cents));
   return {

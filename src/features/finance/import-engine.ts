@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
+import { matchRowsToOwnTransfers, type OwnTransfer, type TransferMatch } from "./import-transfer-match";
 import { normalizeDate, parseMoney } from "./money";
 
 export type ColumnMapping = { date: string; description: string; amount: string; externalId?: string; merchant?: string; type?: string; direction: "SIGNED" | "EXPENSE" | "INCOME" };
 export type NormalizedTransaction = { date: string; description: string; amountCents: number; type: "INCOME" | "EXPENSE" | "REFUND"; merchant: string | null; externalId: string | null; categoryId: string | null; tags: string[]; source: string; fingerprint: string };
-export type ImportPreviewRow = { row: number; data: NormalizedTransaction | null; errors: string[]; duplicate: boolean; appliedRules: string[] };
+export type ImportPreviewRow = { row: number; data: NormalizedTransaction | null; errors: string[]; duplicate: boolean; appliedRules: string[]; duplicateOf?: TransferMatch };
 export type FinanceImportParser = { format: string; parse: (content: string) => { headers: string[]; rows: string[][]; delimiter: string } };
 
 function parseRecords(content: string, delimiter: string) {
@@ -99,12 +100,12 @@ export function applyRules(transaction: NormalizedTransaction, rules: ImportRule
   return { data, appliedRules };
 }
 
-export function previewCsv(content: string, mapping: ColumnMapping, workspaceId: string, accountId: string, existing: Set<string>, rules: ImportRule[] = [], source = "CSV"): ImportPreviewRow[] {
+export function previewCsv(content: string, mapping: ColumnMapping, workspaceId: string, accountId: string, existing: Set<string>, rules: ImportRule[] = [], source = "CSV", ownTransfers: OwnTransfer[] = []): ImportPreviewRow[] {
   const { headers, rows } = CsvFinanceImportParser.parse(content);
   for (const column of [mapping.date, mapping.description, mapping.amount]) if (!headers.includes(column)) throw new Error("Mapeie data, descrição e valor para colunas existentes.");
   if (new Set([mapping.date, mapping.description, mapping.amount]).size !== 3) throw new Error("Data, descrição e valor devem usar colunas diferentes.");
   const seen = new Set(existing);
-  return rows.map((row, index) => {
+  const preview = rows.map((row, index): ImportPreviewRow => {
     try {
       if (row.length !== headers.length) throw new Error(`A linha tem ${row.length} colunas; esperado: ${headers.length}.`);
       const get = (key?: string) => key ? row[headers.indexOf(key)] || "" : "";
@@ -131,6 +132,10 @@ export function previewCsv(content: string, mapping: ColumnMapping, workspaceId:
       return { row: index + 2, data: null, errors: [error instanceof Error ? error.message : "Linha inválida."], duplicate: false, appliedRules: [] };
     }
   });
+  if (!ownTransfers.length) return preview;
+  // Rows that are the bank's view of a transfer already registered between the person's own accounts are not new money.
+  const matches = matchRowsToOwnTransfers(preview.flatMap((item, index) => item.data && !item.duplicate && !item.errors.length ? [{ index, date: item.data.date, amountCents: item.data.amountCents, type: item.data.type }] : []), accountId, ownTransfers);
+  return preview.map((item, index) => matches.has(index) ? { ...item, duplicate: true, duplicateOf: matches.get(index) } : item);
 }
 
 export function isRollbackEligible(transaction: { importBatchId: string | null; revision: number }, batchId: string) {

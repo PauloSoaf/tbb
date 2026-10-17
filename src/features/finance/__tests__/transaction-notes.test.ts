@@ -34,7 +34,7 @@ beforeEach(() => {
   mocks.cellUpdateMany.mockResolvedValue({ count: 1 });
   mocks.transaction.mockImplementation(async (fn: (tx: unknown) => unknown) => fn({
     financeTransaction: { findMany: mocks.findMany, update: mocks.update, create: mocks.create, findFirst: mocks.cellFindFirst, updateMany: mocks.cellUpdateMany },
-    activityEvent: { create: mocks.audit },
+    account: { findFirst: vi.fn().mockResolvedValue(null) }, activityEvent: { create: mocks.audit },
   }));
 });
 

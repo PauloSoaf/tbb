@@ -11,7 +11,7 @@ beforeEach(()=>{
   vi.resetAllMocks();vi.useFakeTimers();vi.setSystemTime(new Date('2032-01-10T16:00:00Z'));
   mocks.permission.mockResolvedValue({workspaceId:'synthetic',userId:'owner',role:'OWNER',workspace:{timezone:'America/Manaus'}});
   mocks.account.mockResolvedValue({id:'cash',type:'CHECKING'});mocks.create.mockResolvedValue({id:'receipt'});mocks.fixed.mockResolvedValue({id:'fixed'});mocks.fixedUpdate.mockResolvedValue({count:1});
-  mocks.transaction.mockImplementation(async(fn:(tx:unknown)=>unknown)=>fn({financePlan:{upsert:mocks.plan},financeTransaction:{create:mocks.create},fixedExpense:{create:mocks.fixed,updateMany:mocks.fixedUpdate},activityEvent:{create:mocks.audit}}));
+  mocks.transaction.mockImplementation(async(fn:(tx:unknown)=>unknown)=>fn({financePlan:{upsert:mocks.plan},financeTransaction:{create:mocks.create},fixedExpense:{create:mocks.fixed,updateMany:mocks.fixedUpdate,findMany:vi.fn().mockResolvedValue([])},subscription:{findMany:vi.fn().mockResolvedValue([])},activityEvent:{create:mocks.audit}}));
 });
 afterEach(()=>vi.useRealTimers());
 describe('expected versus received income',()=>{

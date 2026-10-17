@@ -25,18 +25,19 @@ const newId = () => `s${(globalThis.crypto?.randomUUID?.() ?? Math.random().toSt
 
 /** Compare ways to pay a bill or borrow. Everything here is a study: nothing is contracted, no debt or
  * installment is created, and no bank is contacted. Rates and CET typed in stay "informados por você". */
-export function LoanSimulator({ today, locale, statements, suggestedIncomeCents, suggestedCommitmentsCents, saved, initial }: {
+export function LoanSimulator({ today, locale, statements, suggestedIncomeCents, suggestedCommitmentsCents, saved, initial, goalPreset }: {
   today: string; locale: string; statements: StatementOption[]; suggestedIncomeCents: number; suggestedCommitmentsCents: number; saved: SavedComparison[];
   /** Starts from a saved comparison instead of the blank editor. */
   initial?: SavedComparison;
+  goalPreset?: { name: string; forms: ScenarioForm[]; budget: BudgetForm };
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [forms, setForms] = useState<ScenarioForm[]>(() => (initial ? initial.payload.scenarios.map(formFromScenario) : defaultForms(today)));
-  const [budget, setBudget] = useState<BudgetForm>(() => (initial ? budgetFromPayload(initial.payload) : emptyBudget({ income: centsText(suggestedIncomeCents), commitments: centsText(suggestedCommitmentsCents) })));
+  const [forms, setForms] = useState<ScenarioForm[]>(() => (initial ? initial.payload.scenarios.map(formFromScenario) : goalPreset?.forms ?? defaultForms(today)));
+  const [budget, setBudget] = useState<BudgetForm>(() => (initial ? budgetFromPayload(initial.payload) : goalPreset?.budget ?? emptyBudget({ income: centsText(suggestedIncomeCents), commitments: centsText(suggestedCommitmentsCents) })));
   const [statementId, setStatementId] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [name, setName] = useState(initial?.name ?? "");
+  const [name, setName] = useState(initial?.name ?? goalPreset?.name ?? "");
   const [loadedId, setLoadedId] = useState<string | null>(initial?.id ?? null);
 
   const sim = useMemo(() => simulate(forms, budget), [forms, budget]);

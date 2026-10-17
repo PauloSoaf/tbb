@@ -1,3 +1,4 @@
+import { financePageAccess } from "@/features/finance/finance-page-access";
 import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import { FinanceOverview } from "@/features/finance/FinanceOverview";
 import { PartnerFinanceSummary, type FinanceScopeMetrics } from "@/features/finance/PartnerFinanceSummary";
@@ -6,14 +7,14 @@ import { financeCalendarMonth, financeCalendarOptions, financeCalendarCanWrite }
 import { EmptyState, PageHeader } from "@/components/ui/PageHeader";
 import { dayKey } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
-import { getWorkspaceContext, getPartnerContext, requirePermission } from "@/lib/workspace";
+import { getPartnerContext, requirePermission } from "@/lib/workspace";
 
 function toScopeMetrics(overview: Awaited<ReturnType<typeof financeOverview>>): FinanceScopeMetrics {
   return { netWorthCents: overview.metrics.netWorthCents, incomeCents: overview.metrics.incomeCents, expensesCents: overview.metrics.expensesCents, balanceCents: overview.metrics.balanceCents };
 }
 
 export default async function FinancePage({ searchParams }: { searchParams: Promise<{ scope?: string }> }) {
-  const context = await getWorkspaceContext();
+  const context = await financePageAccess();
   const { scope: rawScope } = await searchParams;
   const scope = rawScope === "partner" || rawScope === "together" ? rawScope : "me";
   const today = dayKey(new Date(), context.workspace.timezone);
@@ -21,7 +22,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
   if (scope !== "me") {
     const partnerAccess = await getPartnerContext("finance");
     if (!partnerAccess) {
-      return <FinancePrivacyBoundary><div className="stack">
+      return <FinancePrivacyBoundary canWrite={context.canWrite}><div className="stack">
         <PageHeader eyebrow="FINANCE" title={scope === "partner" ? "Parceiro" : "Juntos"}/>
         <EmptyState title="Nada para ver aqui ainda" description="Conecte-se a um parceiro em Configurações → Partner, ou peça para ele compartilhar o módulo Finance."/>
       </div></FinancePrivacyBoundary>;
@@ -33,13 +34,13 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
     const partnerMetrics = toScopeMetrics(partnerOverview);
     const partnerName = partnerWorkspace?.name || "Parceiro";
     if (scope === "partner") {
-      return <FinancePrivacyBoundary><div className="stack">
+      return <FinancePrivacyBoundary canWrite={context.canWrite}><div className="stack">
         <PageHeader eyebrow="FINANCE" title="Parceiro" description="Visão somente leitura dos dados que seu parceiro compartilhou."/>
         <PartnerFinanceSummary scope="partner" me={partnerMetrics} partner={partnerMetrics} partnerName={partnerName}/>
       </div></FinancePrivacyBoundary>;
     }
     const meOverview = await financeOverview(context.workspaceId, today);
-    return <FinancePrivacyBoundary><div className="stack">
+    return <FinancePrivacyBoundary canWrite={context.canWrite}><div className="stack">
       <PageHeader eyebrow="FINANCE" title="Juntos" description="Renda, despesas e saldo somados. Cada workspace continua com seus próprios registros."/>
       <PartnerFinanceSummary scope="together" me={toScopeMetrics(meOverview)} partner={partnerMetrics} partnerName={partnerName}/>
     </div></FinancePrivacyBoundary>;
@@ -53,5 +54,5 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
     financeCalendarCanWrite(),
   ]);
   const captureAccounts = overview.accounts.filter((account) => !account.unassigned).map(({ id, name, institution, type }) => ({ id, name, institution, type }));
-  return <FinancePrivacyBoundary><FinanceOverview key={context.workspaceId} data={overview} captureAccounts={captureAccounts} calendar={calendar} calendarCategories={calendarOptions.categories} calendarCanWrite={canWrite}/></FinancePrivacyBoundary>;
+  return <FinancePrivacyBoundary canWrite={context.canWrite}><FinanceOverview key={context.workspaceId} data={overview} captureAccounts={captureAccounts} calendar={calendar} calendarCategories={calendarOptions.categories} calendarCanWrite={canWrite}/></FinancePrivacyBoundary>;
 }

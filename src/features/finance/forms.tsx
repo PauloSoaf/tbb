@@ -1,5 +1,6 @@
 import { ActionForm } from "@/components/ui/ActionForm";
 import { saveBudget, saveCategory, saveDebt, saveSavingsGoal, saveSubscription, saveTransactionRule } from "./actions";
+import { EmptyExpenseCategories } from "./EmptyExpenseCategories";
 
 type Option = { id: string; name: string };
 const Save = ({ label = "Salvar" }: { label?: string }) => <button className="button" type="submit">{label}</button>;
@@ -12,11 +13,12 @@ export function CategoryForm({ categories }: { categories: (Option & { type: str
 }
 
 export function BudgetForm({ categories, today }: { categories: Option[]; today: string }) {
+  if (!categories.length) return <EmptyExpenseCategories/>;
   return <ActionForm action={saveBudget} className="form-grid"><label>Categoria<select name="categoryId" required><option value="">Selecione</option>{categories.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Período<select name="period"><option value="MONTHLY">Mensal</option><option value="WEEKLY">Semanal</option></select></label><Money name="limit" label="Limite"/><label>Início<input name="startDate" type="date" defaultValue={today.slice(0,7)+"-01"} required/></label><label>Fim<input name="endDate" type="date" required/></label><Save/></ActionForm>;
 }
 
 export function SubscriptionForm({ accounts, categories, today }: { accounts: Option[]; categories: Option[]; today: string }) {
-  return <ActionForm action={saveSubscription} className="form-grid"><label>Nome<input name="name" required/></label><label>Estabelecimento<input name="merchant"/></label><Money name="amount" label="Valor"/><label>Ciclo<select name="billingCycle"><option value="MONTHLY">Mensal</option><option value="WEEKLY">Semanal</option><option value="QUARTERLY">Trimestral</option><option value="YEARLY">Anual</option><option value="CUSTOM">Personalizado</option></select></label><label>Próxima cobrança<input name="nextChargeDate" type="date" defaultValue={today} required/></label><label>Início<input name="startedAt" type="date" defaultValue={today} required/></label><label>Conta<select name="accountId"><option value="">Nenhuma</option>{accounts.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Categoria<select name="categoryId"><option value="">Nenhuma</option>{categories.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label><Save/></ActionForm>;
+  return <ActionForm action={saveSubscription} className="form-grid"><label>Nome<input name="name" required/></label><label>Estabelecimento<input name="merchant"/></label><Money name="amount" label="Valor"/><label>Ciclo<select name="billingCycle"><option value="MONTHLY">Mensal</option><option value="WEEKLY">Semanal</option><option value="QUARTERLY">Trimestral</option><option value="YEARLY">Anual</option><option value="CUSTOM">Personalizado</option></select></label><label>Próxima cobrança<input name="nextChargeDate" type="date" defaultValue={today} required/></label><label>Início<input name="startedAt" type="date" defaultValue={today} required/></label><label>Conta<select name="accountId"><option value="">Nenhuma</option>{accounts.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label>Categoria<select name="categoryId"><option value="">Nenhuma</option>{categories.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label><label><input name="independent" type="checkbox"/>Se houver um compromisso semelhante, confirmo que s\u00e3o gastos independentes.</label><Save/></ActionForm>;
 }
 
 export function DebtForm({ today }: { today: string }) {

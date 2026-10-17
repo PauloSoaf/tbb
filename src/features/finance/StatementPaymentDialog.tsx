@@ -28,7 +28,9 @@ const MODES: { value: PaymentMode; title: (owed: string) => string; hint: string
 /** "Marcar como paga". Nothing is chosen by default and nothing happens on one click: the user picks what
  * happened, reviews the result, and confirms. It records the liability only; no expense is created and no
  * account balance moves. */
-export function StatementPaymentDialog({ statement, carryOptions, today, compact = false }: { statement: PayableView; carryOptions: CarryOption[]; today: string; compact?: boolean }) {
+export function StatementPaymentDialog({ statement, carryOptions, today, compact = false, bankAccounts = [], bankTransactions = [] }: { statement: PayableView; carryOptions: CarryOption[]; today: string; compact?: boolean;
+  bankAccounts?: { id: string; name: string }[]; bankTransactions?: { id: string; accountId: string; destinationAccountId: string | null; amountCents: number; date: string; description: string }[];
+}) {
   const router = useRouter();
   const dialog = useRef<HTMLDialogElement>(null);
   const token = useRef(newToken());
@@ -40,6 +42,10 @@ export function StatementPaymentDialog({ statement, carryOptions, today, compact
   const [nextId, setNextId] = useState("");
   const [carryIncluded, setCarryIncluded] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [bankMode, setBankMode] = useState("");
+  const [bankAccountId, setBankAccountId] = useState("");
+  const [bankTransactionId, setBankTransactionId] = useState("");
+  const [balanceConfirmed, setBalanceConfirmed] = useState(false);
   const [serverError, setServerError] = useState("");
 
   let amountCents: number | null = null, amountProblem = "";
@@ -55,6 +61,7 @@ export function StatementPaymentDialog({ statement, carryOptions, today, compact
 
   function open() {
     token.current = newToken();
+    setBankMode(""); setBankAccountId(""); setBankTransactionId(""); setBalanceConfirmed(false);
     setMode(null); setAmount(""); setPaidOn(""); setUnknownDate(false); setNextId(""); setCarryIncluded(false); setConfirmed(false); setServerError("");
     dialog.current?.showModal();
   }
@@ -67,6 +74,8 @@ export function StatementPaymentDialog({ statement, carryOptions, today, compact
     if (unknownDate) fd.set("unknownDate", "on");
     if (mode === "CARRY") { fd.set("nextStatementId", nextId); if (carryIncluded) fd.set("carryIncluded", "on"); }
     if (confirmed) fd.set("confirm", "on");
+    fd.set("bankMode", bankMode || "UNRECONCILED"); fd.set("bankAccountId", bankAccountId); fd.set("bankTransactionId", bankTransactionId);
+    if (balanceConfirmed) fd.set("balanceConfirmed", "on");
     startTransition(async () => {
       const result = await registerStatementPayment(fd);
       if ("error" in result && result.error) { setServerError(result.error); return; }
@@ -115,17 +124,28 @@ export function StatementPaymentDialog({ statement, carryOptions, today, compact
           </label>}
           {mode === "CARRY" && <label className="payment-wide row"><input type="checkbox" checked={carryIncluded} onChange={(event) => { setCarryIncluded(event.target.checked); setConfirmed(false); }}/>Confirmo que o saldo transportado{planned?.ok && planned.plan.carry ? ` (${money(planned.plan.carry.cents)})` : ""} já está incluído no total da fatura escolhida.</label>}
         </div>}
+        {planned?.ok && planned.plan.payment && <fieldset className="stack"><legend>Conciliação com o banco</legend>
+          <label>Situação do dinheiro<select value={bankMode} onChange={event => setBankMode(event.target.value)} required>
+            <option value="">Escolha como tratar o saldo</option><option value="UNRECONCILED">Ainda não sei conciliar com o banco</option>
+            <option value="STATUS_ONLY">Só regularizar a fatura · saldo já atualizado</option><option value="LINKED">Vincular a uma liquidação existente</option>
+            <option value="CREATED">Registrar saída da conta que pagou</option>
+          </select></label>
+          {bankMode === "STATUS_ONLY" && <label><input type="checkbox" checked={balanceConfirmed} onChange={event => setBalanceConfirmed(event.target.checked)}/>O saldo informado já reflete esse pagamento.</label>}
+          {bankMode === "CREATED" && <label>Conta de origem<select value={bankAccountId} onChange={event => setBankAccountId(event.target.value)} required><option value="">Selecione</option>{bankAccounts.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select><small>Cria uma transferência de liquidação, sem nova despesa de consumo. Exige data efetiva.</small></label>}
+          {bankMode === "LINKED" && <label>Movimentação já registrada<select value={bankTransactionId} onChange={event => { setBankTransactionId(event.target.value); const row = bankTransactions.find(row => row.id === event.target.value); if (row) { setPaidOn(row.date); setUnknownDate(false); } }} required><option value="">Selecione</option>{bankTransactions.filter(row => (!row.destinationAccountId || row.destinationAccountId === statement.accountId) && row.amountCents === planned.plan.payment!.amountCents).map(row => <option key={row.id} value={row.id}>{day(row.date)} · {money(row.amountCents)} · {row.description}</option>)}</select></label>}
+          {bankMode === "UNRECONCILED" && <small>Não altera o saldo bancário. O valor fica como pendência de conciliação, sem aumentar o patrimônio artificialmente.</small>}
+        </fieldset>}
         {mode && (planned?.ok
           ? <div className="payment-result" role="status"><strong>Resultado</strong><ul>
             {planned.plan.payment && <li>Pagamento de {money(planned.plan.payment.amountCents)} {planned.plan.payment.date ? `em ${day(planned.plan.payment.date)}` : "sem data informada"}.</li>}
             {planned.plan.carry && <li>{money(planned.plan.carry.cents)} ficam na fatura seguinte e <b>não são somados de novo</b> à dívida.</li>}
             <li>{planned.plan.closes ? "A fatura sai da dívida atual e vai para o histórico quitado." : `A fatura continua aberta com saldo de ${money(planned.plan.outstandingAfterCents)}.`}</li>
-            <li>Nenhuma despesa é criada e nenhum saldo de conta é alterado.</li>
+            <li>{bankMode === "CREATED" ? "A conta escolhida registra a liquidação na data efetiva, sem duplicar consumo." : "Nenhuma nova despesa ou saída bancária é criada."}</li>
           </ul></div>
           : message && <p className="payment-hint" role="status">{message}</p>)}
         {mode && planned?.ok && <label className="payment-confirm row"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}/>Confirmo que esta fatura foi paga como descrito acima. Fica registrado quem fez e quando; posso desfazer pelo histórico.</label>}
         {serverError && <p role="alert" className="form-error">{serverError}</p>}
-        <div className="row justify-between"><button type="button" className="button-secondary" onClick={() => dialog.current?.close()}>Cancelar</button><button type="button" className="button" onClick={submit} disabled={pending || !planned?.ok || !confirmed}>{pending ? "Registrando…" : "Confirmar pagamento"}</button></div>
+        <div className="row justify-between"><button type="button" className="button-secondary" onClick={() => dialog.current?.close()}>Cancelar</button><button type="button" className="button" onClick={submit} disabled={pending || !planned?.ok || !confirmed || Boolean(planned?.ok && planned.plan.payment && (!bankMode || bankMode === "STATUS_ONLY" && !balanceConfirmed || bankMode === "CREATED" && (!bankAccountId || !paidOn) || bankMode === "LINKED" && !bankTransactionId))}>{pending ? "Registrando…" : "Confirmar pagamento"}</button></div>
       </div>
     </dialog>
   </>;

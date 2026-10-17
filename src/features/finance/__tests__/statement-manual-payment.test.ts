@@ -33,6 +33,7 @@ function fake() {
       },
     },
     cardStatementPayment: {
+      findFirst: async ({where}: {where:Record<string,unknown>}) => payments.find(row=>match(row,where)) ?? null,
       findUnique: async ({ where }: { where: { workspaceId_fingerprint: { workspaceId: string; fingerprint: string } } }) => payments.find((pay) => pay.workspaceId === where.workspaceId_fingerprint.workspaceId && pay.fingerprint === where.workspaceId_fingerprint.fingerprint) ?? null,
       create: async ({ data }: { data: Omit<Pay, "id"> }) => {
         if (payments.some((pay) => pay.workspaceId === data.workspaceId && pay.fingerprint === data.fingerprint)) throw new Error("Unique constraint failed");

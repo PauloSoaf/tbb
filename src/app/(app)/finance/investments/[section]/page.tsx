@@ -1,3 +1,4 @@
+import { financePageAccess } from "@/features/finance/finance-page-access";
 import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import { notFound } from "next/navigation";
 import { InvestmentSectionPage } from "@/features/investments/InvestmentSectionPage";
@@ -7,7 +8,7 @@ import { investmentOverview, investmentShellData } from "@/features/investments/
 import { EmptyState, PageHeader } from "@/components/ui/PageHeader";
 import { dayKey } from "@/lib/dates";
 import { prisma } from "@/lib/prisma";
-import { getPartnerContext, getWorkspaceContext } from "@/lib/workspace";
+import { getPartnerContext } from "@/lib/workspace";
 
 export function generateStaticParams() {
   return investmentSections.filter((section) => section.id !== "overview").map((section) => ({ section: section.id }));
@@ -17,18 +18,18 @@ export default async function InvestmentSectionRoute({ params, searchParams }: {
   const { section } = await params;
   const query = await searchParams;
   if (!isInvestmentSectionId(section)) notFound();
-  const context = await getWorkspaceContext();
+  const context = await financePageAccess();
   const today = dayKey(new Date(), context.workspace.timezone);
   const scope = query.scope === "partner" || query.scope === "together" ? query.scope : "me";
   if (scope !== "me") {
     const partnerAccess = await getPartnerContext("investments");
-    if (!partnerAccess) return <FinancePrivacyBoundary><div className="stack"><PageHeader eyebrow="MONEY · INVESTMENTS" title={scope === "partner" ? "Parceiro" : "Juntos"}/><EmptyState title="Nada compartilhado aqui ainda" description="O parceiro ainda não compartilhou Investments."/></div></FinancePrivacyBoundary>;
+    if (!partnerAccess) return <FinancePrivacyBoundary canWrite={context.canWrite}><div className="stack"><PageHeader eyebrow="MONEY · INVESTMENTS" title={scope === "partner" ? "Parceiro" : "Juntos"}/><EmptyState title="Nada compartilhado aqui ainda" description="O parceiro ainda não compartilhou Investments."/></div></FinancePrivacyBoundary>;
     const [partner, partnerWorkspace, me] = await Promise.all([investmentOverview(partnerAccess.partnerWorkspaceId, today), prisma.workspace.findUnique({ where: { id: partnerAccess.partnerWorkspaceId }, select: { name: true } }), scope === "together" ? investmentOverview(context.workspaceId, today) : Promise.resolve(undefined)]);
-    return <FinancePrivacyBoundary><PartnerInvestmentSummary scope={scope} me={me} partner={partner} partnerName={partnerWorkspace?.name || "Parceiro"}/></FinancePrivacyBoundary>;
+    return <FinancePrivacyBoundary canWrite={context.canWrite}><PartnerInvestmentSummary scope={scope} me={me} partner={partner} partnerName={partnerWorkspace?.name || "Parceiro"}/></FinancePrivacyBoundary>;
   }
   const [data, shell] = await Promise.all([
     investmentOverview(context.workspaceId, today),
     investmentShellData(context.workspaceId),
   ]);
-  return <FinancePrivacyBoundary><InvestmentSectionPage section={section} data={data} shell={shell}/></FinancePrivacyBoundary>;
+  return <FinancePrivacyBoundary canWrite={context.canWrite}><InvestmentSectionPage section={section} data={data} shell={shell}/></FinancePrivacyBoundary>;
 }
