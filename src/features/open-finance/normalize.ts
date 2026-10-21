@@ -48,8 +48,11 @@ export function normalizeBankTransaction(transaction: PluggyTransaction, context
   if (declared !== "DEBIT" && declared !== "CREDIT") problems.push("O banco não informou se foi entrada ou saída; confira o sentido.");
 
   const text = merchantKey(`${transaction.description ?? ""} ${transaction.descriptionRaw ?? ""} ${transaction.operationType ?? ""}`);
-  const counterparties = [transaction.paymentData?.payer, transaction.paymentData?.receiver];
-  const ownTransfer = counterparties.some((party) => { const value = digits(party?.documentNumber?.value); return value.length >= 11 && context.ownerTaxNumbers.some((own) => digits(own) === value); });
+  // The holder normally appears on their own side of every PIX. Only the opposite party can identify another account
+  // belonging to them: receiver for an outflow, payer for an inflow.
+  const counterparty = outflow ? transaction.paymentData?.receiver : transaction.paymentData?.payer;
+  const counterpartyDocument = digits(counterparty?.documentNumber?.value);
+  const ownTransfer = counterpartyDocument.length >= 11 && context.ownerTaxNumbers.some((own) => digits(own) === counterpartyDocument);
   let eventKind: ImportCandidate["eventKind"] = outflow ? "PURCHASE" : "INCOME";
   if (CARD_PAYMENT.test(text)) { eventKind = "TRANSFER"; problems.push("Pagamento de fatura de cartão: concilie pela fatura para não contar a compra duas vezes."); }
   else if (ownTransfer) { eventKind = "TRANSFER"; problems.push("Movimentação entre contas da mesma titularidade: registre como transferência."); }

@@ -71,6 +71,31 @@ describe("normalizeBankTransaction", () => {
     expect(other.eventKind).toBe("INCOME");
   });
 
+  it("keeps payments to third parties as spending when the holder is the payer", () => {
+    const row = candidate({ paymentData: {
+      payer: { documentNumber: { type: "CPF", value: "12345678909" } },
+      receiver: { documentNumber: { type: "CPF", value: "98765432100" } },
+    } });
+    expect([row.eventKind, row.confidence, row.problems]).toEqual(["PURCHASE", "CONFIRMED", []]);
+  });
+
+  it("keeps third-party receipts as income when the holder is the receiver", () => {
+    const row = candidate({ type: "CREDIT", paymentData: {
+      payer: { documentNumber: { type: "CPF", value: "98765432100" } },
+      receiver: { documentNumber: { type: "CPF", value: "12345678909" } },
+    } });
+    expect([row.eventKind, row.confidence, row.problems]).toEqual(["INCOME", "CONFIRMED", []]);
+  });
+
+  it("recognises outgoing transfers to another account held by the same person", () => {
+    const row = candidate({ paymentData: {
+      payer: { documentNumber: { type: "CPF", value: "12345678909" } },
+      receiver: { documentNumber: { type: "CPF", value: "123.456.789-09" } },
+    } });
+    expect([row.eventKind, row.confidence]).toEqual(["TRANSFER", "PROBABLE"]);
+    expect(JSON.stringify(row)).not.toContain("12345678909");
+  });
+
   it("classifies refunds and charges", () => {
     expect(candidate({ type: "CREDIT", description: "Estorno compra" }).eventKind).toBe("REFUND");
     expect(candidate({ description: "IOF internacional" }).eventKind).toBe("IOF");
