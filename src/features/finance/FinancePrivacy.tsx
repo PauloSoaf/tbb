@@ -11,6 +11,9 @@ const PrivacyContext = createContext({ enabled: false, toggle: () => {} });
 const rootsSelector = "#main-content, dialog[open], [role=dialog], .modal-backdrop, .modal-overlay, [role=tooltip], [class*=text-chart-tooltip], .floating-calculator-window";
 const chartSelector = ".salary-donut, [data-finance-chart], .finance-spending-heatmap, svg:not(.lucide), canvas, [role=img]:not(.lucide), [role=progressbar], progress, meter, .credit-limit-bar, .credit-limit-track, .credit-limit-segments, .statement-composition-bar, .funding-chart";
 const number = /\p{N}/u;
+/** Areas that show the person's real money: the finance module and the connected-bank screen. */
+const PRIVATE_AREAS = ["/finance", "/integrations/open-finance"];
+export const privateArea = (pathname: string | null) => Boolean(pathname && PRIVATE_AREAS.some((area) => pathname === area || pathname.startsWith(`${area}/`)));
 const pendingBoundary = "[data-finance-privacy-boundary]:not([data-finance-hydrated])";
 
 /** A streamed client subtree must hydrate before the scanner adds attributes or keyboard stops. */
@@ -36,7 +39,7 @@ export function FinancePrivacyProvider({ initialEnabled, children }: { initialEn
   const pathname = usePathname();
   const [enabled, setEnabled] = useState(initialEnabled);
   const scope = useRef<HTMLDivElement>(null);
-  const active = enabled && (pathname === "/finance" || pathname?.startsWith("/finance/"));
+  const active = enabled && privateArea(pathname);
   const toggle = useCallback(() => {
     const next = !enabled;
     document.cookie = `tbb-finance-privacy=${next ? "1" : "0"}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`;

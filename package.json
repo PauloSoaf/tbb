@@ -18,6 +18,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "typecheck": "tsc --noEmit",
+    "open-finance:probe": "node scripts/open-finance-probe.mjs",
     "setup:local": "node scripts/setup-local.mjs"
   },
   "dependencies": {

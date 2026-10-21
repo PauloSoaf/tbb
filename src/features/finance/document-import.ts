@@ -4,6 +4,8 @@ import { candidateSchema, type ImportCandidate, type EvidencePreview } from "./i
 import { evidenceFingerprint, ledgerType, reconcileCandidate, sourceHash } from "./import-reconciliation";
 import { dateOnly } from "./money";
 import { applyRules } from "./import-engine";
+import { matchRowsToOwnTransfers } from "./import-transfer-match";
+import { ownTransfersFor } from "./own-transfers";
 import type { ParsedDocument } from "./document-parsers";
 
 export type ImportActor = { workspaceId: string; userId: string; role: string };
@@ -66,7 +68,7 @@ export async function previewFinancialEvidence(db: DB, actor: ImportActor, sourc
     db.cardStatementPayment.findMany({ where: { workspaceId: actor.workspaceId, accountId: { in: sources.map(s => s.accountId) } }, select: { id: true, accountId: true, fingerprint: true, amountCents: true, date: true } }),
   ]);
   if (evidence.length > 5000) throw new Error("Revise no máximo 5.000 ocorrências por vez.");
-  const rows: EvidencePreview[] = evidence.map(e => {
+  const reviewed: EvidencePreview[] = evidence.map(e => {
     const source = sources.find(s => s.id === e.sourceId)!, candidate = candidateSchema.parse(e.candidate);
     const fingerprint = evidenceFingerprint(actor.workspaceId, source.accountId, source.sha256, candidate);
     const related = candidate.relatedLocator ? evidence.find(parent => parent.sourceId === source.id && parent.locator === candidate.relatedLocator) : null;
@@ -83,6 +85,20 @@ export async function previewFinancialEvidence(db: DB, actor: ImportActor, sourc
     }
     return { id: e.id, version: e.version, sourceId: e.sourceId, fileName: source.fileName, candidate, ...match, matches: match.matches.map(t => ({ id: t.id, description: t.description, date: t.date, revision: t.revision })) };
   });
+  // A statement shows a PIX between the person's own accounts as income or expense, but it is already held as one transfer.
+  const accounts = [...new Set(sources.map(source => source.accountId))];
+  const ownTransfers = new Map(await Promise.all(accounts.map(async accountId => [accountId, await ownTransfersFor(db, actor.workspaceId, accountId)] as const)));
+  const rows = [...reviewed];
+  for (const accountId of accounts) {
+    const transfers = ownTransfers.get(accountId) ?? [];
+    if (!transfers.length) continue;
+    const accountRows = reviewed.flatMap((row, index) => sources.find(source => source.id === row.sourceId)?.accountId === accountId && row.action === "CREATE" && row.candidate.amountCents && row.candidate.effectiveDate && ["PURCHASE", "PURCHASE_INSTALLMENT", "REFUND", "INCOME"].includes(row.candidate.eventKind)
+      ? [{ index, date: row.candidate.effectiveDate, amountCents: row.candidate.amountCents, type: ledgerType(row.candidate) }] : []);
+    for (const [index, match] of matchRowsToOwnTransfers(accountRows, accountId, transfers)) {
+      const transfer = transfers.find(item => item.id === match.transactionId)!;
+      rows[index] = { ...rows[index], action: "KEEP", reason: `Já registrado como transferência entre suas contas (${match.label}). Não será lançado de novo.`, matches: [{ id: transfer.id, description: match.label, date: transfer.date, revision: 0 }] };
+    }
+  }
   const statements = await db.cardStatement.findMany({ where: { workspaceId: actor.workspaceId, id: { in: [...new Set(rows.flatMap(r => r.candidate.statementId ? [r.candidate.statementId] : []))] } }, select: { id: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, updatedAt: true, rolledIntoStatementId: true, amountIsOutstanding: true } });
   const token = createHash("sha256").update(JSON.stringify({ rows, statements, versions: evidence.map(e => [e.id, e.version, e.decision]) })).digest("hex");
   return { rows, token, documents: sources.map(s => ({ id: s.id, accountId: s.accountId, fileName: s.fileName, metadata: (batches.find(b => b.id === s.importBatchId)?.preview as { metadata?: Record<string, unknown> } | null)?.metadata || {} })), counts: { create: rows.filter(r => r.action === "CREATE").length, keep: rows.filter(r => r.action === "KEEP").length, review: rows.filter(r => ["AMBIGUOUS", "CONFLICT"].includes(r.action)).length, ignore: rows.filter(r => r.action === "IGNORE").length } };

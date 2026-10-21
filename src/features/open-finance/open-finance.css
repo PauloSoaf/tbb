@@ -1,0 +1,27 @@
+.of-page{min-width:0}
+.of-checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:10px;margin:0;padding:0;list-style:none}
+.of-checks li{display:flex;flex-direction:column;gap:3px;padding:11px 13px;border:1px solid var(--border);border-radius:10px;border-left:3px solid var(--warning)}
+.of-checks li[data-ok]{border-left-color:var(--success)}
+.of-checks span{color:var(--muted-foreground);font-size:.78rem;overflow-wrap:anywhere}
+.of-steps{display:flex;flex-direction:column;gap:7px;margin:10px 0 0;padding-left:22px;list-style:decimal;font-size:.84rem}
+.of-page details>p{margin-top:10px}
+.of-steps a,.of-page details>p a{color:var(--primary)}
+.of-connection .badge[data-tone=ok]{background:color-mix(in srgb,var(--success) 14%,transparent);color:var(--success)}
+.of-connection .badge[data-tone=warn]{background:color-mix(in srgb,var(--warning) 16%,transparent);color:var(--warning)}
+.of-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:10px;margin:0}
+.of-facts dt{color:var(--muted-foreground);font-size:.72rem}
+.of-facts dd{margin:2px 0 0;font-size:.86rem;font-weight:600}
+.of-accounts{display:flex;flex-direction:column;gap:12px;margin:0;padding:0;list-style:none}
+.of-account{display:flex;flex-direction:column;gap:9px;padding:13px;border:1px solid var(--border);border-radius:10px;min-width:0}
+.of-account-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.of-account-head>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.of-account-head small,.of-balance small{color:var(--muted-foreground);font-size:.72rem}
+.of-balance{text-align:right}
+.of-map{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) auto auto;gap:10px;align-items:end}
+.of-map label{min-width:0}
+.of-check{flex-direction:row;align-items:center;gap:8px;white-space:nowrap}
+.of-check input{width:auto}
+.of-drift{font-size:.78rem;color:var(--success)}
+.of-drift[data-off]{color:var(--warning)}
+.of-drift a{color:var(--primary)}
+@media(max-width:700px){.of-map{grid-template-columns:minmax(0,1fr)}.of-balance{text-align:left}}

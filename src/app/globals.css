@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "../features/finance/planning/planning.css";
 @import "../features/finance/balance-sync.css";
+@import "../features/open-finance/open-finance.css";
 /* Financial source history needs to fit narrow viewports with real filenames. */
 .finance-imports-page,.finance-imports-page .list-item>div{min-width:0}
 .finance-imports-page .list-item{flex-wrap:wrap;gap:12px}

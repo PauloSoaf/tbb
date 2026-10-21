@@ -49,6 +49,7 @@ model Account {
   fixedExpensesOnCard FixedExpense[] @relation("FixedExpenseCard")
   fixedPayments FixedExpense[] @relation("FixedExpensePaymentAccount")
   variableForecasts MonthlyFinancialPlan[]
+  openFinanceLinks OpenFinanceAccountLink[]
 }
 
 enum CardStatementKind {
@@ -1121,4 +1122,79 @@ model FinancePlanningReview {
   fixedExpense FixedExpense? @relation(fields: [fixedExpenseId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
   @@unique([workspaceId, fingerprint])
   @@index([workspaceId, status])
+}
+
+// Open Finance through Meu Pluggy (personal use). Credentials live only in the environment; the item id is encrypted at rest.
+model OpenFinanceConnection {
+  id String @id @default(cuid())
+  workspaceId String
+  provider String @default("MEUPLUGGY")
+  itemIdCipher String
+  itemIdHash String
+  label String
+  institutionName String?
+  status String @default("ACTIVE")
+  providerStatus String?
+  providerExecutionStatus String?
+  providerUpdatedAt DateTime?
+  nextAutoSyncAt DateTime?
+  consentExpiresAt DateTime?
+  lastSyncedAt DateTime?
+  lastErrorCode String?
+  lastErrorAt DateTime?
+  syncLeaseUntil DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  accounts OpenFinanceAccountLink[]
+  runs OpenFinanceSyncRun[]
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, itemIdHash])
+  @@index([workspaceId, status])
+}
+
+model OpenFinanceAccountLink {
+  id String @id @default(cuid())
+  workspaceId String
+  connectionId String
+  externalAccountId String
+  accountId String?
+  kind String
+  subtype String?
+  displayName String
+  maskedNumber String?
+  syncFromDate DateTime? @db.Date
+  isEnabled Boolean @default(false)
+  providerBalanceCents Int?
+  providerBalanceAt DateTime?
+  lastTransactionDate DateTime? @db.Date
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connection OpenFinanceConnection @relation(fields: [connectionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  account Account? @relation(fields: [accountId, workspaceId], references: [id, workspaceId], onDelete: NoAction, onUpdate: NoAction)
+  @@unique([connectionId, externalAccountId])
+  @@index([workspaceId, accountId])
+}
+
+model OpenFinanceSyncRun {
+  id String @id @default(cuid())
+  workspaceId String
+  connectionId String
+  trigger String
+  status String @default("RUNNING")
+  startedAt DateTime @default(now())
+  finishedAt DateTime?
+  accountsSeen Int @default(0)
+  transactionsFetched Int @default(0)
+  pendingSkipped Int @default(0)
+  outsideWindow Int @default(0)
+  staged Int @default(0)
+  autoCreated Int @default(0)
+  needsReview Int @default(0)
+  alreadyKnown Int @default(0)
+  errorCode String?
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connection OpenFinanceConnection @relation(fields: [connectionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  @@index([workspaceId, connectionId, startedAt])
 }

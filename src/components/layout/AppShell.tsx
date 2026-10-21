@@ -15,7 +15,7 @@ import { NotificationBell, type ShellNotification } from "./NotificationBell";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { PartnerScopeSwitcher } from "./PartnerScopeSwitcher";
 import { useI18n } from "@/lib/i18n/I18nContext";
-import { FinancePrivacyToggle } from "@/features/finance/FinancePrivacy";
+import { FinancePrivacyToggle, privateArea } from "@/features/finance/FinancePrivacy";
 
 const COLLAPSED_KEY = "tbb-sidebar-collapsed";
 
@@ -122,6 +122,6 @@ export function AppShell({children,workspaceName,userName,isAdmin,notifications,
       })}{isAdmin&&<div className={expanded?undefined:"nav-rail-group"}>{items([adminItem])}</div>}</nav>
       <div className="workspace-label">{railTip(`${workspaceName} · ${t("shell.workspace")}`,<span className="avatar">{userName.slice(0,1).toUpperCase()}</span>)}<div className="workspace-copy"><p>{workspaceName}</p><small>{t("shell.workspace")}</small></div></div>
     </aside>
-    <div className="app-main"><header ref={topbarRef} className="topbar" data-autohide={navbarAutoHide||undefined} data-open={navbarAutoHide&&navbarOpen||undefined} onMouseEnter={keepNavbarOpen} onMouseLeave={scheduleNavbarClose} onFocusCapture={keepNavbarOpen} onBlurCapture={scheduleNavbarClose}><div className="row"><button className="icon-button mobile-menu" aria-label="Abrir menu" onClick={()=>setMobile(true)}><Menu size={19}/></button></div><div className="topbar-actions">{pathname?.startsWith("/finance")&&<FinancePrivacyToggle/>}<CommandPalette/><NotificationBell initialItems={notifications}/>{partnerName&&<Suspense fallback={null}><PartnerScopeSwitcher partnerName={partnerName}/></Suspense>}<LangToggle/><ThemeToggle showLabel/><Link className="avatar" href="/settings" aria-label="Seu perfil">{userName.slice(0,1).toUpperCase()}</Link></div></header><main id="main-content" className="content" onClick={()=>{if(mobile)setMobile(false)}}><Suspense fallback={null}><AppNavigationBar/></Suspense>{children}</main><MobileBottomNav/></div>
+    <div className="app-main"><header ref={topbarRef} className="topbar" data-autohide={navbarAutoHide||undefined} data-open={navbarAutoHide&&navbarOpen||undefined} onMouseEnter={keepNavbarOpen} onMouseLeave={scheduleNavbarClose} onFocusCapture={keepNavbarOpen} onBlurCapture={scheduleNavbarClose}><div className="row"><button className="icon-button mobile-menu" aria-label="Abrir menu" onClick={()=>setMobile(true)}><Menu size={19}/></button></div><div className="topbar-actions">{privateArea(pathname)&&<FinancePrivacyToggle/>}<CommandPalette/><NotificationBell initialItems={notifications}/>{partnerName&&<Suspense fallback={null}><PartnerScopeSwitcher partnerName={partnerName}/></Suspense>}<LangToggle/><ThemeToggle showLabel/><Link className="avatar" href="/settings" aria-label="Seu perfil">{userName.slice(0,1).toUpperCase()}</Link></div></header><main id="main-content" className="content" onClick={()=>{if(mobile)setMobile(false)}}><Suspense fallback={null}><AppNavigationBar/></Suspense>{children}</main><MobileBottomNav/></div>
   </div>;
 }

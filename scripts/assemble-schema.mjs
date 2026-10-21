@@ -12,6 +12,7 @@ export const workspaceRelations = {
   CardStatement: 'cardStatements', CardStatementPayment: 'statementPayments', FinancePlan: 'financePlan?', FixedExpense: 'fixedExpenses',
   FinancialSource: 'financialSources', FinancialSnapshot: 'financialSnapshots', LoanComparison: 'loanComparisons', PersonalAsset: 'personalAssets',
   MonthlyFinancialPlan: 'monthlyFinancialPlans', BudgetTransactionReview: 'budgetTransactionReviews', SavingsContribution: 'savingsContributions', FinancePlanningReview: 'financePlanningReviews',
+  OpenFinanceConnection: 'openFinanceConnections', OpenFinanceAccountLink: 'openFinanceAccountLinks', OpenFinanceSyncRun: 'openFinanceSyncRuns',
   InvestmentAccount: 'investmentAccounts', InvestmentAsset: 'investmentAssets', InvestmentPosition: 'investmentPositions',
   InvestmentTransaction: 'investmentTransactions', InvestmentIncome: 'investmentIncome', InvestmentBudget: 'investmentBudgets',
   InvestmentAllocationTarget: 'investmentAllocationTargets', InvestmentPortfolioSnapshot: 'investmentPortfolioSnapshots', InvestmentBenchmark: 'investmentBenchmarks',

@@ -9,7 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { AuthorizationError, requirePermission } from "@/lib/tenancy/requirePermission";
 import { dateOnly, normalizeDate, parseMoney } from "./money";
 import { planBalanceSync, POSSIBLE_DUPLICATE_PREFIX } from "./balance-sync";
-import type { OwnTransfer } from "./import-transfer-match";
+import { CASH_ACCOUNT_TYPES, ownTransfersFor } from "./own-transfers";
 import { CsvFinanceImportParser, previewCsv, transactionFingerprint, type ImportPreviewRow } from "./import-engine";
 import { applyCardStatementImport, previewCardStatementImport } from "./card-statement-import";
 import { statementLinkError } from "./card-statements";
@@ -110,7 +110,6 @@ export async function saveAccount(fd: FormData) {
   } catch (error) { return failure(error); }
 }
 
-const CASH_ACCOUNT_TYPES = ["CHECKING", "SAVINGS", "CASH", "DIGITAL_WALLET"] as const;
 /** Balance of one cash account through the end of `until`, using the same rule the account screens display. */
 async function cashBalanceCents(tx: Prisma.TransactionClient, workspaceId: string, account: { id: string; initialBalanceCents: number }, until: Date) {
   const [origin, incoming] = await Promise.all([
@@ -536,15 +535,6 @@ export async function uploadFinanceDocument(fd: FormData) {
 
 const mappingSchema = z.object({ date: z.string().min(1), description: z.string().min(1), amount: z.string().min(1), externalId: z.string().optional(), merchant: z.string().optional(), type: z.string().optional(), direction: z.enum(["SIGNED", "EXPENSE", "INCOME"]) });
 
-/** Transfers the person registered between two of their own cash accounts, as seen from one account's statement. */
-async function ownTransfersFor(tx: Prisma.TransactionClient, workspaceId: string, accountId: string): Promise<OwnTransfer[]> {
-  const rows = await tx.financeTransaction.findMany({
-    where: { workspaceId, type: "TRANSFER", importBatchId: null, OR: [{ accountId }, { destinationAccountId: accountId }], account: { type: { in: [...CASH_ACCOUNT_TYPES] } }, destinationAccount: { type: { in: [...CASH_ACCOUNT_TYPES] } } },
-    select: { id: true, date: true, amountCents: true, accountId: true, destinationAccountId: true, account: { select: { name: true } }, destinationAccount: { select: { name: true } } },
-    orderBy: { date: "desc" }, take: 2000,
-  });
-  return rows.flatMap(row => row.destinationAccountId && row.destinationAccount ? [{ id: row.id, date: row.date.toISOString().slice(0, 10), amountCents: row.amountCents, fromAccountId: row.accountId, toAccountId: row.destinationAccountId, fromName: row.account.name, toName: row.destinationAccount.name }] : []);
-}
 async function existingFingerprints(tx: Prisma.TransactionClient, workspaceId: string, accountId: string) {
   const rows = await tx.financeTransaction.findMany({ where: { workspaceId, accountId }, select: { date: true, description: true, amountCents: true, type: true, externalId: true, fingerprint: true } });
   return new Set(rows.flatMap(t => {
