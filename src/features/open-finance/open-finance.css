@@ -1,4 +1,15 @@
 .of-page{min-width:0}
+.of-bank-setup{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px;margin:0;padding:0;list-style:none}
+.of-bank-setup>li{display:flex;flex-direction:column;gap:14px;align-items:flex-start;padding:14px;border:1px solid var(--border);border-radius:10px;min-width:0}
+.of-institution-name{display:flex;gap:10px;align-items:center;min-width:0}
+.of-institution-name h3{margin:0;font-size:.95rem}
+.of-institution-name p{margin:2px 0 0}
+.of-institution-mark{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;font-size:.8rem;font-weight:700;background:var(--muted);flex-shrink:0}
+.of-bank-setup>li[data-institution=nubank] .of-institution-mark{background:#820ad1;color:#fff}
+.of-bank-setup>li[data-institution=itau] .of-institution-mark{background:#ec7000;color:#071a36}
+.of-bank-setup>li[data-institution=picpay] .of-institution-mark{background:#11c76f;color:#071a36}
+.of-connect-guide{margin-bottom:16px;font-size:.84rem}
+.of-connection{scroll-margin-top:20px}
 .of-checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:10px;margin:0;padding:0;list-style:none}
 .of-checks li{display:flex;flex-direction:column;gap:3px;padding:11px 13px;border:1px solid var(--border);border-radius:10px;border-left:3px solid var(--warning)}
 .of-checks li[data-ok]{border-left-color:var(--success)}

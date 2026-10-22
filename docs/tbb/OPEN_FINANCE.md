@@ -53,6 +53,16 @@ A [documentação oficial do Meu Pluggy](https://docs.pluggy.ai/pt/docs/guides/m
 
 Para renovar, repita **Aplicações → sua aplicação → Demo → Conectar Conta → MeuPluggy** e autorize novamente. Uma sincronização ou atualização pela API não renova essa autorização. Confira o `itemId` resultante: ele pode mudar. Se mudou, pause a conexão antiga e valide a nova antes de habilitá-la, conciliando o histórico já importado. O TBB não migra automaticamente vínculos entre Item IDs distintos.
 
+### Adicionar Itaú e PicPay junto ao Nubank
+
+Em **Bancos conectados → Seus bancos no TBB**, os atalhos **Conectar Itaú** e **Conectar PicPay** abrem o cadastro com o nome preenchido e as instruções de autorização. Use a mesma aplicação e as credenciais que já estão no servidor; cada banco precisa do seu próprio Item ID. Cole-o diretamente no TBB, sem enviar identificadores ou dados bancários pelo chat.
+
+Depois de cadastrar cada conexão, use **Sincronizar agora** para listar as contas. Vincule a conta bancária à conta correspondente que já existe no TBB e o cartão ao cartão existente. Escolha a data inicial e habilite apenas os vínculos desejados. Não são criadas contas locais automaticamente, nem é presumido que o nome de um banco autoriza um vínculo. Se houver mais de um produto no mesmo banco, confira cada conta e cartão separadamente.
+
+Cada revisão de fatura identifica a conexão e o cartão, e oferece somente as faturas daquele cartão. Isso evita confundir bancos que tenham o mesmo vencimento. O motor de débito/crédito é compartilhado: detalhes entram como já incluídos, pagamentos e transferências incertos aguardam conciliação, e faturas incompletas exigem conferência. O conector pode oferecer produtos e campos diferentes em cada instituição; o cadastro não confirma que um banco foi autorizado ou que publicou sua fatura atual.
+
+Os testes com respostas sintéticas cobrem Nubank, Itaú e PicPay no mesmo espaço: identidades de movimentos iguais entre bancos, contas e faturas existentes, repetição sem duplicatas, PIX próprio já registrado e falha isolada de um cartão. A validação real de uma instituição exige a conexão autorizada pelo titular, conforme o [guia oficial do Meu Pluggy](https://docs.pluggy.ai/pt/docs/guides/meu-pluggy-personal-use).
+
 ## Arquitetura
 
 ```

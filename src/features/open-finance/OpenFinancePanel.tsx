@@ -8,6 +8,7 @@ import { money } from "@/features/finance/money";
 import { addOpenFinanceConnection, mapOpenFinanceAccount, pauseOpenFinanceConnection, removeOpenFinanceConnection, reviewOpenFinanceBill, syncOpenFinanceNow } from "./actions";
 import { accountKindLabel, connectionStatusLabel, openFinanceError, runStatusLabel } from "./copy";
 import type { OpenFinanceOverview } from "./queries";
+import { connectionInstitution, INSTITUTIONS, type Institution } from "./institutions";
 
 export type TbbCashAccount = { id: string; name: string; balanceCents: number; kind?: "BANK" | "CREDIT" };
 type Connection = Extract<OpenFinanceOverview, { ready: true }>["connections"][number];
@@ -16,15 +17,28 @@ const dayLabel = (value: string | null) => value ? value.split("-").reverse().jo
 const tone = (status: string) => status === "ACTIVE" ? "ok" : status === "PAUSED" ? "muted" : "warn";
 const billStatusLabel: Record<string, string> = { OPEN: "Aberta", FUTURE_KNOWN: "Futura conhecida", PAID: "Quitada", FORECAST: "Previsão" };
 
-function AddConnection({ count }: { count: number }) {
-  return <Modal title="Adicionar conexão do Meu Pluggy" trigger={<><Plus size={15}/>Adicionar conexão</>} triggerClassName="button">
+function AddConnection({ count, institution }: { count: number; institution?: Institution }) {
+  return <Modal title={institution ? `Conectar ${institution.name} pelo Meu Pluggy` : "Adicionar conexão do Meu Pluggy"} trigger={<><Plus size={15}/>{institution ? `Conectar ${institution.name}` : "Adicionar conexão"}</>} triggerClassName={institution ? "button-secondary" : "button"}>
+    {institution && <div className="of-connect-guide"><p>Use as credenciais da Pluggy já configuradas no TBB.</p><ol className="of-steps"><li>Conecte {institution.name} em <a href="https://meu.pluggy.ai" target="_blank" rel="noreferrer">Meu Pluggy</a> e autorize no aplicativo do banco.</li><li>No <a href="https://dashboard.pluggy.ai" target="_blank" rel="noreferrer">Dashboard da Pluggy</a>, abra sua aplicação → Demo → Conectar Conta e escolha <strong>MeuPluggy</strong>.</li><li>Copie o Item ID de {institution.name} e cole abaixo. Depois sincronize e escolha as contas e cartões já existentes no TBB.</li></ol></div>}
     <KeepFormValues><ActionForm key={count} action={addOpenFinanceConnection} className="stack" resetOnSuccess={false}>
-      <label>Nome da conexão<input name="label" required maxLength={80} placeholder="Ex.: Nubank" autoComplete="off"/></label>
+      <label>Nome da conexão<input name="label" required maxLength={80} defaultValue={institution?.name ?? ""} placeholder="Ex.: Nubank" autoComplete="off"/></label>
       <label>Item ID<input name="itemId" required placeholder="00000000-0000-0000-0000-000000000000" autoComplete="off" spellCheck={false}/></label>
       <p className="muted text-sm">Copie o Item ID em Aplicações → sua aplicação → Demo → Itens conectados, no Dashboard da Pluggy. Ele é guardado criptografado e nunca aparece de novo na tela.</p>
       <button className="button" type="submit">Adicionar</button>
     </ActionForm></KeepFormValues>
   </Modal>;
+}
+
+function InstitutionSetup({ connections }: { connections: Connection[] }) {
+  return <section className="panel stack" aria-labelledby="of-banks-title"><div><h2 id="of-banks-title">Seus bancos no TBB</h2><p className="muted text-sm">Cada banco tem sua própria autorização. Conta, reserva e cartão são vinculados separadamente aos registros que você já tem.</p></div>
+    <ul className="of-bank-setup">{INSTITUTIONS.map(institution => {
+      const connection = connections.find(value => connectionInstitution([value.label, value.institutionName, ...value.accounts.map(account => account.displayName)])?.id === institution.id);
+      return <li key={institution.id} data-institution={institution.id}><div className="of-institution-name"><span className="of-institution-mark" aria-hidden="true">{institution.initials}</span><div><h3>{institution.name}</h3><p className="muted text-xs">{connection ? "Cadastrado no TBB" : "Aguardando conexão"}</p></div></div>
+        {connection ? <a className="button-secondary" href={`#of-connection-${connection.id}`}>Ver vínculo</a> : <AddConnection count={connections.length} institution={institution}/>}
+      </li>;
+    })}</ul>
+    <p className="muted text-xs">Só serão importadas as contas que você habilitar. Cole os Item IDs nesta tela; não é preciso enviá-los pelo chat.</p>
+  </section>;
 }
 
 function AccountRow({ account, tbb }: { account: Connection["accounts"][number]; tbb: TbbCashAccount[] }) {
@@ -54,7 +68,7 @@ function CreditBillReviews({ reviews }: { reviews: OpenFinanceOverview["creditRe
   if (!reviews.length) return null;
   return <section className="panel stack"><h2>Faturas para conciliar</h2><p className="muted text-sm">Confira a fatura de destino e o total informado pelo banco antes de substituir os valores do TBB.</p>
     {reviews.map(review => <article key={review.id} className="of-bill-review stack">
-      <div><strong>Vence {dayLabel(review.dueDate)} · {review.balanceCents !== null ? "Total conciliado " : "Total no banco "}{money(review.totalCents)}</strong>{review.balanceCents !== null && <p className="muted text-sm">Saldo em aberto no banco: {money(review.balanceCents)}. O total acima inclui pagamentos registrados até a data da fonte.</p>}<p className="muted text-xs">{review.closingDate ? `Fecha ${dayLabel(review.closingDate)}` : "Fechamento não informado pelo banco"}</p><p className="muted text-sm">{review.reason}</p><Link className="muted text-sm" href="/finance/statements">Conferir faturas e pagamentos →</Link></div>
+      <div><h3>{review.connectionLabel} · {review.accountName}</h3><strong>Vence {dayLabel(review.dueDate)} · {review.balanceCents !== null ? "Total conciliado " : "Total no banco "}{money(review.totalCents)}</strong>{review.balanceCents !== null && <p className="muted text-sm">Saldo em aberto no banco: {money(review.balanceCents)}. O total acima inclui pagamentos registrados até a data da fonte.</p>}<p className="muted text-xs">{review.closingDate ? `Fecha ${dayLabel(review.closingDate)}` : "Fechamento não informado pelo banco"}</p><p className="muted text-sm">{review.reason}</p><Link className="muted text-sm" href="/finance/statements">Conferir faturas e pagamentos →</Link></div>
       <KeepFormValues><ActionForm action={reviewOpenFinanceBill} className="of-map" resetOnSuccess={false}>
         <input type="hidden" name="snapshotId" value={review.id}/>
         <label>Fatura no TBB<select name="target" defaultValue={review.statements.find(statement => statement.id === review.statementId) ? `${review.statementId}|${review.statements.find(statement => statement.id === review.statementId)!.version}` : ""}>
@@ -71,7 +85,7 @@ function CreditBillReviews({ reviews }: { reviews: OpenFinanceOverview["creditRe
 function ConnectionCard({ connection, tbb }: { connection: Connection; tbb: TbbCashAccount[] }) {
   const error = openFinanceError(connection.lastErrorCode);
   const paused = connection.status === "PAUSED", resumable = paused || connection.status === "CONSENT_EXPIRED";
-  return <article className="panel stack of-connection">
+  return <article className="panel stack of-connection" id={`of-connection-${connection.id}`}>
     <header className="row justify-between">
       <div><h2>{connection.label}</h2><p className="muted text-sm">{connection.institutionName ? `${connection.institutionName} · ` : ""}Meu Pluggy</p></div>
       <span className="badge" data-tone={tone(connection.status)}>{connectionStatusLabel[connection.status] ?? connection.status}</span>
@@ -117,6 +131,7 @@ export function OpenFinancePanel({ overview, tbbAccounts, migrationReady }: { ov
         <p className="muted text-xs">Gratuito para uso pessoal, até 5 conexões. Não use para fins comerciais.</p>
       </details>
     </section>
+    {migrationReady && overview.configured && <InstitutionSetup connections={overview.connections}/>}
     {overview.pendingReview > 0 && <section className="panel row justify-between"><p><strong>{overview.pendingReview} movimento(s)</strong> aguardam sua revisão: possíveis duplicidades, pagamentos de fatura e transferências entre contas suas.</p><Link className="button" href="/finance/imports">Revisar em Importar → Retomar revisão</Link></section>}
     <CreditBillReviews reviews={overview.creditReviews}/>
     {overview.connections.map((connection) => <ConnectionCard key={connection.id} connection={connection} tbb={tbbAccounts}/>)}
