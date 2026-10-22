@@ -26,7 +26,7 @@ export const pluggyTransactionSchema = z.object({
   providerCode: text,
   paymentData: z.object({ payer: party, receiver: party, paymentMethod: text, reason: text, referenceNumber: text }).passthrough().nullish(),
   merchant: z.object({ name: text, businessName: text }).passthrough().nullish(),
-  creditCardMetadata: z.object({ installmentNumber: number, totalInstallments: number, totalAmount: number, purchaseDate: text, billId: text, cardNumber: text }).passthrough().nullish(),
+  creditCardMetadata: z.object({ installmentNumber: number, totalInstallments: number, totalAmount: number, purchaseDate: text, transactionDateTime: text, billId: text, cardNumber: text }).passthrough().nullish(),
 }).passthrough();
 export type PluggyTransaction = z.infer<typeof pluggyTransactionSchema>;
 
@@ -66,6 +66,7 @@ export const pluggyBillSchema = z.object({
   totalAmountCurrencyCode: text,
   minimumPaymentAmount: number,
   allowsInstallments: z.boolean().nullish(),
+  payments: z.array(z.object({ amount: number, paymentDate: text, currencyCode: text, valueType: text }).passthrough()).nullish(),
 }).passthrough();
 export type PluggyBill = z.infer<typeof pluggyBillSchema>;
 

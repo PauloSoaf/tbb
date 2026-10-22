@@ -24,4 +24,9 @@
 .of-drift{font-size:.78rem;color:var(--success)}
 .of-drift[data-off]{color:var(--warning)}
 .of-drift a{color:var(--primary)}
+.of-bill-review{padding:14px;border:1px solid var(--border);border-radius:10px;min-width:0}
+.of-bill-review .of-map{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}
+.of-bill-review .of-check{grid-column:1/-1;white-space:normal}
+.of-bill-review button{justify-self:start}
 @media(max-width:700px){.of-map{grid-template-columns:minmax(0,1fr)}.of-balance{text-align:left}}
+@media(max-width:700px){.of-bill-review .of-map{grid-template-columns:minmax(0,1fr)}}

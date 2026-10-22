@@ -51,10 +51,11 @@ export async function mapAccountLink(db: PrismaClient, actor: ImportActor, linkI
   const link = await db.openFinanceAccountLink.findFirst({ where: { id: linkId, workspaceId: actor.workspaceId } });
   if (!link) throw new Error("Conta do banco não encontrada.");
   if (input.enabled && !input.accountId) throw new Error("Escolha a conta do TBB que receberá os lançamentos.");
-  if (input.enabled && link.kind !== "BANK") throw new Error("A sincronização de cartões ainda está em validação. Por enquanto, apenas contas bancárias.");
+  if (!["BANK", "CREDIT"].includes(link.kind)) throw new Error("Tipo de conta não suportado.");
+  if (input.enabled && link.kind === "CREDIT" && !input.syncFromDate) throw new Error("Informe a data inicial das compras do cartão.");
   if (input.accountId) {
-    const account = await db.account.findFirst({ where: { id: input.accountId, workspaceId: actor.workspaceId, isArchived: false, currency: "BRL", type: { in: [...CASH_ACCOUNT_TYPES] } } });
-    if (!account) throw new Error("Escolha uma conta corrente, carteira, dinheiro ou reserva deste espaço.");
+    const account = await db.account.findFirst({ where: { id: input.accountId, workspaceId: actor.workspaceId, isArchived: false, currency: "BRL", type: link.kind === "CREDIT" ? "CREDIT_CARD" : { in: [...CASH_ACCOUNT_TYPES] } } });
+    if (!account) throw new Error(link.kind === "CREDIT" ? "Vincule cartões apenas a uma conta de cartão de crédito deste espaço." : "Escolha uma conta corrente, carteira, dinheiro ou reserva deste espaço.");
     const taken = await db.openFinanceAccountLink.findFirst({ where: { workspaceId: actor.workspaceId, accountId: input.accountId, isEnabled: true, id: { not: link.id } }, select: { displayName: true } });
     if (input.enabled && taken) throw new Error(`Esta conta do TBB já recebe lançamentos de “${taken.displayName}”. Duas fontes na mesma conta duplicariam valores.`);
   }

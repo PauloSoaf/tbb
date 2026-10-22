@@ -1,6 +1,6 @@
 # Open Finance pelo Meu Pluggy
 
-Integração de **uso pessoal**, gratuita, para trazer saldos e movimentos das contas bancárias do titular para o TBB. Não é uma integração comercial, não guarda senhas bancárias e não usa APIs não oficiais nem scraping.
+Integração de **uso pessoal**, gratuita, para trazer saldos bancários, movimentos, compras de cartão e faturas do titular para o TBB. Não é uma integração comercial, não guarda senhas bancárias e não usa APIs não oficiais nem scraping.
 
 ## O que a documentação oficial confirma (consultada em 17/10/2026)
 
@@ -22,7 +22,7 @@ Integração de **uso pessoal**, gratuita, para trazer saldos e movimentos das c
 | Sentido do valor em conta corrente | Não está documentado; o TBB usa `type`, não o sinal | `npm run open-finance:probe` |
 | `providerId` presente no MeuPluggy | Identidade estável para não duplicar | Probe |
 | Formato do `next` do cursor v2 | O cliente aceita query string, caminho, URL da Pluggy ou cursor simples, mas só a prática confirma | Probe |
-| Faturas (`/bills`) e `billId` para cartões | A cobertura não tem coluna de faturas | Probe |
+| Faturas (`/bills`) e `billId` para cartões | O retorno depende do conector; uma compra sem fatura/ciclo confirmado exige revisão | Probe e conciliação de crédito |
 | Parcelamento (`installmentNumber`, `totalInstallments`) | `totalAmount` não vem de conectores Open Finance | Probe |
 | Data como meia-noite UTC ou com horário | Evita deslocar o dia em fuso atrás de UTC | Probe |
 | Renovação de consentimento | A autorização da aplicação dura um ano e é separada do consentimento de cada banco | Reautorizar MeuPluggy na Demo do Dashboard e conferir o novo `itemId` antes de retomar |
@@ -45,7 +45,7 @@ Remove-Item Env:\PLUGGY_ITEM_ID
 O diagnóstico autentica na Pluggy e consulta item, contas, transações e, se houver cartão, a estrutura de faturas. Não acessa o Prisma, não grava no banco do TBB e não sincroniza nem ajusta saldos. A leitura real ainda precisa ser validada; testes com respostas simuladas não a substituem.
 
 5. Aplique a migração no banco real somente após revisar as migrações pendentes, verificar um backup recuperável e obter autorização do titular. Essa etapa é separada do diagnóstico.
-6. Com o diagnóstico aprovado e a migração aplicada, abra **Integrações → Open Finance**, adicione a conexão pelo Item ID e sincronize para listar as contas. Inicialmente elas ficam desabilitadas. Vincule a conta bancária à conta de débito correspondente do TBB, defina a data inicial e só então habilite a importação. Cartões e faturas continuam fora da importação automática nesta etapa.
+6. Com o diagnóstico aprovado e a migração aplicada, abra **Integrações → Open Finance**, adicione a conexão pelo Item ID e sincronize para listar as contas. Inicialmente elas ficam desabilitadas. Vincule cada conta bancária à conta de débito correspondente e cada cartão ao cartão de crédito existente no TBB. Defina a data inicial e só então habilite a importação. O mesmo Item pode disponibilizar conta bancária e cartão; cada um tem seu próprio vínculo e pode ser pausado separadamente pelo checkbox.
 
 ### Renovação da autorização
 
@@ -89,10 +89,25 @@ Três tabelas novas e nenhuma alteração nas existentes (migração `2026101715
 3. **Só o inequívoco é criado sozinho:** entrada ou saída simples, estorno, tarifa, IOF e juros, com todos os dados confirmados. Vai para a **revisão** (Importar → Retomar revisão de um original): possível duplicata de lançamento manual (mesma conta, valor, tipo, até 3 dias e nome parecido), pagamento de fatura de cartão, movimento entre contas da mesma titularidade e qualquer linha com dado incerto.
 4. **Pagamento de fatura nunca vira gasto**: as compras do cartão já contam.
 5. **Transferência própria.** Um PIX que o titular já registrou como transferência entre contas aparece no banco como entrada ou saída. A prévia da revisão reconhece essa linha e a liquida, em vez de contar o dinheiro duas vezes. Para identificar a mesma titularidade, compara-se o documento da contraparte: o recebedor nas saídas e o pagador nas entradas. A presença do titular no seu próprio lado do PIX não transforma um pagamento a terceiros ou um recebimento em transferência própria. Essa interpretação segue os campos `payer`, `receiver` e `type` da [documentação de transações da Pluggy](https://docs.pluggy.ai/pt/docs/products/transactions).
-6. **Pendentes** (`PENDING`) não são importados; entram quando liquidam.
+6. **Pendentes** (`PENDING`) da conta bancária não são importados; entram quando liquidam. No cartão, compras da fatura aberta e parcelas futuras podem ser pendentes e são aceitas quando a fatura/ciclo está confirmado. Isso não cria saída na conta de débito.
 7. **Id mudou na Pluggy** (apagado e recriado): o movimento reaparece com outro id e é tratado como possível duplicata, não como novo.
 8. **Dados pessoais.** O número do documento de pagador e recebedor é usado só em memória para reconhecer a mesma titularidade e nunca é gravado.
 9. **Erros** viram código curto e mensagem em português; o corpo da resposta do provedor nunca é registrado.
+
+## Cartões, faturas e parcelas
+
+- **Vínculo.** Uma conta `CREDIT` da Pluggy só pode apontar para `CREDIT_CARD` no mesmo workspace; o servidor exige uma data inicial para compras. A conta bancária continua separada e seus saldos não são ajustados pelo fluxo do cartão.
+- **Leitura completa.** `/bills` é percorrido por página; `/v2/transactions` usa cursor. Um retorno inválido impede a conciliação daquele cartão e aparece como falha parcial da conexão, preservando o restante.
+- **Identidade da fatura.** O vínculo é guardado em `FinancialSnapshot`, com origem imutável em `FinancialSource`. Na primeira conciliação, vencimento exato ou uma previsão única do período permitem reaproveitar o ID existente. Uma previsão passa a fatura conhecida; datas divergentes ou múltiplos candidatos exigem revisão. Nenhuma tabela adicional é necessária para crédito.
+- **Atualização do total.** O total do banco é o valor de face, separado dos pagamentos registrados. Compras importadas recebem `ALREADY_INCLUDED`; não são somadas novamente à fatura. Quando existem compras manuais `ADDED_TO_STATEMENT`, a base armazenada é o total do banco menos esses acréscimos, mantendo o total efetivo uma vez só.
+- **Fatura ainda não publicada.** Alguns conectores retornam apenas faturas fechadas em `/bills`. Nesses casos, `Account.balance` representa o saldo ainda não pago da fatura aberta, conforme a [documentação de contas](https://docs.pluggy.ai/en/docs/products/accounts). O TBB propõe associá-lo à fatura atual já cadastrada e exige uma primeira conferência. O total conciliado soma ao saldo os pagamentos conhecidos até a data da fonte; a dedução normal desses pagamentos mantém o saldo uma vez só. Vencimento e fechamento vêm da fatura existente, sem inventar um novo ciclo. Pagamentos sem data ou alterações após a prévia bloqueiam a confirmação. Um vencimento antigo no cadastro de crédito não é usado para reabrir uma fatura histórica quitada.
+- **Preservação.** Datas/valores divergentes na primeira leitura, alterações manuais posteriores, detalhamento maior que o total, saldo restante, sobreposição, transporte de saldo e faturas quitadas são protegidos. O histórico já quitado mantém também suas datas e metadados locais em leituras repetidas. O snapshot guarda a versão da fatura e a identidade dos acréscimos manuais. Atualizações posteriores só são automáticas enquanto esse vínculo continua válido e a fonte não é mais antiga que a conciliação local.
+- **Revisão de faturas.** Em Bancos conectados, “Faturas para conciliar” mostra total do banco, candidatos locais e situação. Confirmar exige selecionar o registro correto e conferir o total. O servidor verifica titularidade, conta, versão e colisões novamente. Uma quitação nova continua no fluxo de pagamento das Faturas, que também concilia a conta bancária.
+- **Ciclo sem `billId`.** Uma compra pendente pode usar a fatura atual apenas com vínculo confirmado, fechamentos anterior e atual conhecidos e data estritamente entre esses fechamentos. Para uma fatura ainda não publicada, o fechamento local exige a conferência explícita do titular junto ao saldo em aberto. O dia de fechamento e parcelas sem um ciclo confirmado aguardam revisão; não se inventam vencimentos nem parcelas restantes.
+- **Parcelamento.** Número, total de parcelas, data da compra e valor original são preservados quando informados. Cada lançamento representa somente sua parcela; `totalAmount` nunca multiplica o valor nem gera parcelas novas. A data de lançamento e a competência da fatura permanecem separadas da compra original.
+- **Correções do provedor.** Um lançamento já importado cujo valor muda gera conflito, preservando o lançamento local. Uma ocorrência ainda não revisada pode receber nova evidência quando o banco completa a fatura; a fonte antiga permanece no histórico. Revisões feitas pelo titular não são substituídas.
+- **Pagamentos e estornos.** Um pagamento de cartão nunca vira despesa nem receita; fica para conciliar com os pagamentos existentes. Estornos são classificados pela direção e tipo declarados. Nenhum pagamento ou ajuste de saldo é criado automaticamente só porque uma fatura venceu.
+- **Privacidade.** Toda a conciliação roda no servidor local com regras determinísticas. O caminho de sincronização não chama APIs de IA e não registra respostas bancárias em logs.
 
 ## Estados da conexão
 
@@ -132,7 +147,15 @@ R$ 0. Meu Pluggy gratuito (uso pessoal, até 5 conexões). Sem custo de API. Se 
 
 ## Fora do escopo desta etapa
 
-- **Cartões e faturas.** A sincronização de cartão está desabilitada até o probe confirmar `billId`, faturas e parcelas; o TBB já tem regras próprias de fatura e parcela que não podem receber dados incompletos. Não se inventa parcela nem se altera vencimento sem evidência.
+- **Pagamentos de cartão automáticos.** A quitação e a conciliação com a conta de débito continuam no fluxo de pagamentos existente; o Open Finance apresenta a evidência para revisão.
 - **Transferências entre duas contas conectadas** (PIX do titular para ele mesmo, entrando em uma e saindo da outra) sem registro prévio: hoje as duas linhas vão para a revisão por terem a mesma titularidade.
 - Saldo do banco pré-preenchendo "Atualizar saldos" (a diferença já aparece na tela).
 - Verificação de token de portador para o aplicativo móvel e captura de notificações do Android, que usará o mesmo mecanismo de conciliação.
+
+## Validação do crédito
+
+A cobertura inclui compras pendentes, ciclos sem `billId`, parcelas incompletas, paginação de faturas, repetição sem duplicatas, correções do provedor, preservação de pagamentos e histórico quitado, promoção de previsão, mudanças manuais e aprovação de saldo em aberto. Os testes de PostgreSQL usam um banco descartável e respostas sintéticas da Pluggy.
+
+A tela foi verificada em desktop, 390 px e 320 px, incluindo privacidade, escolha do cartão, confirmação de fatura, bloqueio para não titulares e erros de console/hidratação. Tipos, lint e compilação de produção também fazem parte da validação.
+
+A leitura de uma fatura incompleta não substitui silenciosamente o valor local: a primeira associação do saldo em aberto permanece em **Faturas para conciliar**. Após conferir e confirmar, use **Sincronizar agora** para importar o detalhamento já conciliado. Essa ação lê os dados disponíveis; não solicita atualização do Meu Pluggy.

@@ -126,4 +126,12 @@ describe("Pluggy client", () => {
     expect([accounts.items.length, accounts.invalid, bills.items[0].id]).toEqual([1, 1, "bill-1"]);
     expect(calls.every((call) => call.method === "GET" || call.path === "/auth")).toBe(true);
   });
+
+  it("reads every bill page so an older or future bill is not silently omitted", async () => {
+    const { client } = make({ "/auth": auth(),
+      "/bills?accountId=card&pageSize=500": [{ body: { results: [{ id: "first" }], totalPages: 2, page: 1 } }],
+      "/bills?accountId=card&pageSize=500&page=2": [{ body: { results: [{ id: "second" }], totalPages: 2, page: 2 } }],
+    });
+    expect((await client.listBills("card")).items.map(bill => bill.id)).toEqual(["first", "second"]);
+  });
 });

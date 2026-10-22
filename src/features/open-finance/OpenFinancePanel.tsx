@@ -5,15 +5,16 @@ import { ActionForm } from "@/components/ui/ActionForm";
 import { KeepFormValues } from "@/components/ui/KeepFormValues";
 import { Modal } from "@/components/ui/Modal";
 import { money } from "@/features/finance/money";
-import { addOpenFinanceConnection, mapOpenFinanceAccount, pauseOpenFinanceConnection, removeOpenFinanceConnection, syncOpenFinanceNow } from "./actions";
+import { addOpenFinanceConnection, mapOpenFinanceAccount, pauseOpenFinanceConnection, removeOpenFinanceConnection, reviewOpenFinanceBill, syncOpenFinanceNow } from "./actions";
 import { accountKindLabel, connectionStatusLabel, openFinanceError, runStatusLabel } from "./copy";
 import type { OpenFinanceOverview } from "./queries";
 
-export type TbbCashAccount = { id: string; name: string; balanceCents: number };
+export type TbbCashAccount = { id: string; name: string; balanceCents: number; kind?: "BANK" | "CREDIT" };
 type Connection = Extract<OpenFinanceOverview, { ready: true }>["connections"][number];
 const when = (value: string | null) => value ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "—";
 const dayLabel = (value: string | null) => value ? value.split("-").reverse().join("/") : "—";
 const tone = (status: string) => status === "ACTIVE" ? "ok" : status === "PAUSED" ? "muted" : "warn";
+const billStatusLabel: Record<string, string> = { OPEN: "Aberta", FUTURE_KNOWN: "Futura conhecida", PAID: "Quitada", FORECAST: "Previsão" };
 
 function AddConnection({ count }: { count: number }) {
   return <Modal title="Adicionar conexão do Meu Pluggy" trigger={<><Plus size={15}/>Adicionar conexão</>} triggerClassName="button">
@@ -27,7 +28,8 @@ function AddConnection({ count }: { count: number }) {
 }
 
 function AccountRow({ account, tbb }: { account: Connection["accounts"][number]; tbb: TbbCashAccount[] }) {
-  const mapped = tbb.find((item) => item.id === account.accountId);
+  const compatible = tbb.filter(item => (item.kind ?? "BANK") === account.kind);
+  const mapped = compatible.find((item) => item.id === account.accountId);
   const drift = mapped && account.providerBalanceCents != null ? account.providerBalanceCents - mapped.balanceCents : null;
   const isCard = account.kind !== "BANK";
   return <li className="of-account">
@@ -35,17 +37,35 @@ function AccountRow({ account, tbb }: { account: Connection["accounts"][number];
       <div><strong>{account.displayName}</strong><small>{accountKindLabel[account.kind] ?? account.kind}{account.maskedNumber ? ` · final ${account.maskedNumber}` : ""}</small></div>
       {account.providerBalanceCents != null && <div className="of-balance"><small>Saldo no banco</small><strong>{money(account.providerBalanceCents)}</strong></div>}
     </div>
-    {isCard ? <p className="muted text-xs">A sincronização de cartões e faturas ainda está em validação. Por enquanto, apenas contas bancárias são importadas.</p>
-      : <KeepFormValues><ActionForm key={`${account.accountId}|${account.syncFromDate}|${account.isEnabled}`} action={mapOpenFinanceAccount} className="of-map" resetOnSuccess={false}>
+    <KeepFormValues><ActionForm key={`${account.accountId}|${account.syncFromDate}|${account.isEnabled}`} action={mapOpenFinanceAccount} className="of-map" resetOnSuccess={false}>
         <input type="hidden" name="linkId" value={account.id}/>
-        <label>Conta do TBB<select name="accountId" defaultValue={account.accountId ?? ""}><option value="">Não vincular</option>{tbb.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <label>Importar a partir de<input type="date" name="syncFromDate" defaultValue={account.syncFromDate ?? ""}/></label>
+        <label>{isCard ? "Cartão do TBB" : "Conta do TBB"}<select name="accountId" defaultValue={account.accountId ?? ""}><option value="">Não vincular</option>{compatible.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label>{isCard ? "Compras a partir de" : "Importar a partir de"}<input type="date" name="syncFromDate" defaultValue={account.syncFromDate ?? ""}/></label>
         <label className="of-check"><input type="checkbox" name="enabled" defaultChecked={account.isEnabled}/><span>Sincronizar esta conta</span></label>
         <button className="button-secondary" type="submit">Salvar</button>
-      </ActionForm></KeepFormValues>}
+      </ActionForm></KeepFormValues>
+    {isCard && <p className="muted text-xs">Faturas são conciliadas pelo vencimento. Compras entram como detalhamento já incluído no total; parcelas futuras exigem dados confirmados. Pagamentos e divergências aguardam revisão.</p>}
     {!isCard && <p className="muted text-xs">Movimentos anteriores à data de início nunca são importados, para não alterar o saldo que o TBB já acompanha.{account.lastTransactionDate ? ` Último movimento lido: ${dayLabel(account.lastTransactionDate)}.` : ""}</p>}
     {drift !== null && <p className="of-drift" data-off={drift !== 0 || undefined}>{drift === 0 ? "O saldo do TBB confere com o do banco." : <>Saldo do TBB {money(mapped!.balanceCents)} · diferença {money(drift)}. <Link href="/finance/accounts">Conferir em Atualizar saldos →</Link></>}</p>}
   </li>;
+}
+
+function CreditBillReviews({ reviews }: { reviews: OpenFinanceOverview["creditReviews"] }) {
+  if (!reviews.length) return null;
+  return <section className="panel stack"><h2>Faturas para conciliar</h2><p className="muted text-sm">Confira a fatura de destino e o total informado pelo banco antes de substituir os valores do TBB.</p>
+    {reviews.map(review => <article key={review.id} className="of-bill-review stack">
+      <div><strong>Vence {dayLabel(review.dueDate)} · {review.balanceCents !== null ? "Total conciliado " : "Total no banco "}{money(review.totalCents)}</strong>{review.balanceCents !== null && <p className="muted text-sm">Saldo em aberto no banco: {money(review.balanceCents)}. O total acima inclui pagamentos registrados até a data da fonte.</p>}<p className="muted text-xs">{review.closingDate ? `Fecha ${dayLabel(review.closingDate)}` : "Fechamento não informado pelo banco"}</p><p className="muted text-sm">{review.reason}</p><Link className="muted text-sm" href="/finance/statements">Conferir faturas e pagamentos →</Link></div>
+      <KeepFormValues><ActionForm action={reviewOpenFinanceBill} className="of-map" resetOnSuccess={false}>
+        <input type="hidden" name="snapshotId" value={review.id}/>
+        <label>Fatura no TBB<select name="target" defaultValue={review.statements.find(statement => statement.id === review.statementId) ? `${review.statementId}|${review.statements.find(statement => statement.id === review.statementId)!.version}` : ""}>
+          <option value="">Nova fatura, se o período ainda não existir</option>{review.statements.map(statement => <option key={statement.id} value={`${statement.id}|${statement.version}`}>{statement.dueDate ? dayLabel(statement.dueDate) : statement.referenceMonth || "Sem vencimento"}{statement.closingDate ? ` · fecha ${dayLabel(statement.closingDate)}` : ""} · {money(statement.amountCents)} · {billStatusLabel[statement.status] ?? statement.status}</option>)}
+        </select></label>
+        <label>Situação confirmada<select name="status" required defaultValue={review.status ?? ""}><option value="" disabled>Conferir situação</option><option value="OPEN">Aberta</option><option value="FUTURE_KNOWN">Futura conhecida</option><option value="PAID">Quitada, com pagamento confirmado</option></select></label>
+        <label className="of-check"><input type="checkbox" name="confirm" required/><span>Conferi o total e a fatura de destino</span></label>
+        <button className="button-secondary" type="submit">Conciliar fatura</button>
+      </ActionForm></KeepFormValues>
+    </article>)}
+  </section>;
 }
 
 function ConnectionCard({ connection, tbb }: { connection: Connection; tbb: TbbCashAccount[] }) {
@@ -98,6 +118,7 @@ export function OpenFinancePanel({ overview, tbbAccounts, migrationReady }: { ov
       </details>
     </section>
     {overview.pendingReview > 0 && <section className="panel row justify-between"><p><strong>{overview.pendingReview} movimento(s)</strong> aguardam sua revisão: possíveis duplicidades, pagamentos de fatura e transferências entre contas suas.</p><Link className="button" href="/finance/imports">Revisar em Importar → Retomar revisão</Link></section>}
+    <CreditBillReviews reviews={overview.creditReviews}/>
     {overview.connections.map((connection) => <ConnectionCard key={connection.id} connection={connection} tbb={tbbAccounts}/>)}
     {migrationReady && overview.configured && overview.connections.length === 0 && <section className="panel"><p className="muted">Nenhum banco conectado ainda. Siga os passos acima e use “Adicionar conexão”.</p></section>}
   </div>;

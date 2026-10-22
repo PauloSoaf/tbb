@@ -95,7 +95,16 @@ export function createPluggyClient(options: PluggyClientOptions) {
   return {
     getItem: (itemId: string): Promise<PluggyItem> => one(`/items/${encodeURIComponent(itemId)}`, pluggyItemSchema),
     listAccounts: async (itemId: string): Promise<Fetched<PluggyAccount>> => list(`/accounts?itemId=${encodeURIComponent(itemId)}`, pluggyAccountSchema),
-    listBills: async (accountId: string): Promise<Fetched<PluggyBill>> => list(`/bills?accountId=${encodeURIComponent(accountId)}&pageSize=500`, pluggyBillSchema),
+    async listBills(accountId: string): Promise<Fetched<PluggyBill>> {
+      const items: PluggyBill[] = []; let invalid = 0;
+      for (let index = 1; index <= MAX_PAGES; index++) {
+        const page = await one(`/bills?accountId=${encodeURIComponent(accountId)}&pageSize=500${index > 1 ? `&page=${index}` : ""}`, pagedSchema);
+        const checked = validated(page.results, pluggyBillSchema);
+        items.push(...checked.items); invalid += checked.invalid;
+        if (!page.totalPages || index >= page.totalPages) return { items, invalid };
+      }
+      throw new PluggyError("TOO_MANY_PAGES");
+    },
     async listTransactions(accountId: string, filters: { dateFrom?: string; dateTo?: string } = {}): Promise<Fetched<PluggyTransaction> & { pages: number }> {
       const base = new URLSearchParams({ accountId, ...(filters.dateFrom ? { dateFrom: filters.dateFrom } : {}), ...(filters.dateTo ? { dateTo: filters.dateTo } : {}) });
       let path = `/v2/transactions?${base}`; const seen = new Set<string>(), items: PluggyTransaction[] = []; let invalid = 0, pages = 0;

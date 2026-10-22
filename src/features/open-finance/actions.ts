@@ -8,6 +8,7 @@ import { addConnection, mapAccountLink, removeConnection, setConnectionPaused } 
 import { openFinanceError, syncMessage } from "./copy";
 import { PluggyError, sharedPluggyClient } from "./pluggy-client";
 import { syncConnection } from "./sync";
+import { approveCreditBill } from "./credit-bills";
 
 const text = (fd: FormData, key: string) => String(fd.get(key) || "").trim();
 const invalidate = () => { revalidatePath("/integrations/open-finance"); revalidatePath("/integrations"); revalidatePath("/finance", "layout"); };
@@ -40,6 +41,16 @@ export async function mapOpenFinanceAccount(fd: FormData) {
     const ctx = await requirePermission("WRITE");
     await mapAccountLink(prisma, ctx, text(fd, "linkId"), { accountId: text(fd, "accountId") || null, syncFromDate: text(fd, "syncFromDate") || null, enabled: fd.get("enabled") === "on" });
     invalidate(); return { success: "Conta salva." };
+  } catch (error) { return fail(error); }
+}
+
+export async function reviewOpenFinanceBill(fd: FormData) {
+  try {
+    const ctx = await requirePermission("WRITE");
+    const status = z.enum(["OPEN", "FUTURE_KNOWN", "PAID"]).parse(text(fd, "status"));
+    const [statementId, statementVersion] = text(fd, "target").split("|");
+    await approveCreditBill(prisma, ctx, { snapshotId: text(fd, "snapshotId"), statementId: statementId || null, statementVersion: statementVersion || null, status, confirmed: fd.get("confirm") === "on" });
+    invalidate(); return { success: "Fatura conciliada. Use Sincronizar agora para importar o detalhamento disponível." };
   } catch (error) { return fail(error); }
 }
 

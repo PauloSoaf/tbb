@@ -1,12 +1,14 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
-import { confirmFinancialEvidence, previewFinancialEvidence, runFinancialImport, stageFinancialDocuments, type ImportActor } from "@/features/finance/document-import";
+import { assertImportOwner, confirmFinancialEvidence, previewFinancialEvidence, runFinancialImport, stageFinancialDocuments, type ImportActor } from "@/features/finance/document-import";
 import type { ParsedDocument } from "@/features/finance/document-parsers";
-import type { ImportCandidate } from "@/features/finance/import-candidates";
+import { candidateSchema, type ImportCandidate } from "@/features/finance/import-candidates";
 import { evidenceFingerprint, sourceHash } from "@/features/finance/import-reconciliation";
 import { ownerActor } from "./connections";
 import { normalizeBankTransaction } from "./normalize";
 import { PluggyError, type PluggyClient } from "./pluggy-client";
 import { revealItemId } from "./secret";
+import { prepareCreditSync } from "./credit-sync";
+import { dayOf } from "./normalize";
 
 const LEASE_MS = 10 * 60 * 1000;
 /** Pluggy can revise a movement shortly after it appears, so each sync looks a little behind the last one. Known movements cost nothing. */
@@ -15,7 +17,7 @@ const CHUNK = 500;
 /** Cron runs that arrive too soon after a sync do nothing: Meu Pluggy only refreshes about every 24 hours. */
 export const MIN_CRON_INTERVAL_MS = 3 * 60 * 60 * 1000;
 /** Only plain income or spending is created without a person looking at it; everything else waits in the review. */
-const AUTO_CREATE_KINDS = new Set<ImportCandidate["eventKind"]>(["PURCHASE", "INCOME", "REFUND", "FEE", "IOF", "INTEREST"]);
+const AUTO_CREATE_KINDS = new Set<ImportCandidate["eventKind"]>(["PURCHASE", "PURCHASE_INSTALLMENT", "INCOME", "REFUND", "FEE", "IOF", "INTEREST"]);
 const NEEDS_USER = new Set(["LOGIN_ERROR", "WAITING_USER_ACTION", "WAITING_USER_INPUT"]);
 
 export type SyncStatus = "SUCCESS" | "PARTIAL" | "ERROR" | "BUSY" | "PAUSED" | "CONSENT_EXPIRED" | "NEEDS_RECONNECT";
@@ -26,7 +28,7 @@ const addDays = (value: string, days: number) => dayKey(new Date(Date.parse(`${v
 const cents = (value: number) => Math.round(value * 100);
 const errorCode = (error: unknown) => error instanceof PluggyError ? error.code : "SYNC_FAILED";
 
-export type SyncDeps = { prisma: PrismaClient; client: PluggyClient; now?: () => Date };
+export type SyncDeps = { prisma: PrismaClient; client: PluggyClient; now?: () => Date; accountLinkId?: string };
 
 /**
  * One connection, one run. Safe to repeat: a movement is staged once, recognised by the provider's identity, and the
@@ -34,6 +36,7 @@ export type SyncDeps = { prisma: PrismaClient; client: PluggyClient; now?: () =>
  */
 export async function syncConnection(deps: SyncDeps, actor: ImportActor, connectionId: string, trigger: "MANUAL" | "CRON"): Promise<SyncSummary> {
   const { prisma, client } = deps, now = deps.now?.() ?? new Date();
+  await assertImportOwner(prisma, actor);
   const claimed = await prisma.openFinanceConnection.updateMany({
     where: { id: connectionId, workspaceId: actor.workspaceId, status: { in: ["ACTIVE", "ERROR"] }, OR: [{ syncLeaseUntil: null }, { syncLeaseUntil: { lt: now } }] },
     data: { syncLeaseUntil: new Date(now.getTime() + LEASE_MS) },
@@ -75,12 +78,27 @@ export async function syncConnection(deps: SyncDeps, actor: ImportActor, connect
           update: base,
         });
       }
-      const links = await prisma.openFinanceAccountLink.findMany({ where: { connectionId: connection.id, workspaceId: actor.workspaceId, isEnabled: true, accountId: { not: null }, kind: "BANK" }, include: { account: { select: { name: true, isArchived: true } } } });
+      const links = await prisma.openFinanceAccountLink.findMany({ where: { connectionId: connection.id, workspaceId: actor.workspaceId, ...(deps.accountLinkId ? { id: deps.accountLinkId } : {}), isEnabled: true, accountId: { not: null }, kind: { in: ["BANK", "CREDIT"] } }, include: { account: { select: { name: true, isArchived: true, type: true } } } });
+      if (deps.accountLinkId && !links.length) throw new Error("Vínculo ativo não encontrado nesta conexão.");
       for (const link of links) {
         if (!link.accountId || !link.account || link.account.isArchived) continue;
         try {
           const syncFrom = link.syncFromDate ? dayKey(link.syncFromDate) : null;
           const lastDay = link.lastTransactionDate ? dayKey(link.lastTransactionDate) : null;
+          if (link.kind === "CREDIT") {
+            const remote = accounts.items.find(account => account.id === link.externalAccountId && account.type === "CREDIT");
+            if (!remote || link.account.type !== "CREDIT_CARD") throw new PluggyError("UNEXPECTED_RESPONSE");
+            const credit = await prepareCreditSync({ prisma, client, actor, linkId: link.id, accountId: link.accountId, externalAccountId: link.externalAccountId, remote, timezone: workspace.timezone, syncFrom, asOfDate: item.lastUpdatedAt ? dayOf(item.lastUpdatedAt, workspace.timezone) ?? today : today });
+            summary.transactionsFetched += credit.fetched; summary.outsideWindow += credit.outsideWindow; summary.needsReview += credit.needsReview;
+            const fresh = await withoutKnown(prisma, actor.workspaceId, link.accountId, credit.candidates, true);
+            summary.alreadyKnown += credit.candidates.length - fresh.length;
+            for (let start = 0; start < fresh.length; start += CHUNK) {
+              const result = await stageAndApply(prisma, actor, link.accountId, `Open Finance · ${connection.label} · ${link.account.name} · ${today}`, connection.label, fresh.slice(start, start + CHUNK), true);
+              summary.staged += result.staged; summary.autoCreated += result.autoCreated; summary.needsReview += result.needsReview; summary.alreadyKnown += result.kept;
+            }
+            if (credit.newest) await prisma.openFinanceAccountLink.update({ where: { id: link.id }, data: { lastTransactionDate: new Date(`${credit.newest}T00:00:00.000Z`) } });
+            continue;
+          }
           const from = lastDay ? (syncFrom && addDays(lastDay, -OVERLAP_DAYS) < syncFrom ? syncFrom : addDays(lastDay, -OVERLAP_DAYS)) : syncFrom;
           const fetched = await client.listTransactions(link.externalAccountId, from ? { dateFrom: from } : {});
           summary.transactionsFetched += fetched.items.length;
@@ -120,16 +138,24 @@ export async function syncConnection(deps: SyncDeps, actor: ImportActor, connect
 }
 
 /** Drops what the ledger or an earlier review already holds, so a movement is staged at most once. */
-async function withoutKnown(prisma: PrismaClient, workspaceId: string, accountId: string, candidates: ImportCandidate[]) {
+async function withoutKnown(prisma: PrismaClient, workspaceId: string, accountId: string, candidates: ImportCandidate[], credit = false) {
   if (!candidates.length) return candidates;
   const prints = new Map(candidates.map(candidate => [evidenceFingerprint(workspaceId, accountId, "", candidate), candidate]));
   const [ledger, staged] = await Promise.all([
-    prisma.financeTransaction.findMany({ where: { workspaceId, accountId, fingerprint: { in: [...prints.keys()] } }, select: { fingerprint: true } }),
-    prisma.financialEvidence.findMany({ where: { workspaceId, source: { accountId }, locator: { in: candidates.map(candidate => candidate.locator) } }, select: { locator: true } }),
+    prisma.financeTransaction.findMany({ where: { workspaceId, accountId, fingerprint: { in: [...prints.keys()] } }, select: { fingerprint: true, amountCents: true, type: true } }),
+    prisma.financialEvidence.findMany({ where: { workspaceId, source: { accountId }, locator: { in: candidates.map(candidate => candidate.locator) } }, select: { locator: true, candidate: true, decision: true, version: true, reviewedByUserId: true } }),
   ]);
   const known = new Set(ledger.flatMap(row => row.fingerprint ? [row.fingerprint] : []));
   const seen = new Set(staged.map(row => row.locator));
-  return [...prints].filter(([print, candidate]) => !known.has(print) && !seen.has(candidate.locator)).map(([, candidate]) => candidate);
+  return [...prints].filter(([print, candidate]) => {
+    if (!credit) return !known.has(print) && !seen.has(candidate.locator);
+    const existing = ledger.find(row => row.fingerprint === print);
+    if (existing && existing.amountCents === candidate.amountCents && existing.type === (candidate.eventKind === "REFUND" ? "REFUND" : "EXPENSE")) return false;
+    const evidence = staged.filter(row => row.locator === candidate.locator);
+    if (evidence.some(row => row.decision === "IGNORE" && row.reviewedByUserId || row.decision === "NEEDS_REVIEW" && (row.version > 1 || row.reviewedByUserId))) return false;
+    if (evidence.some(row => JSON.stringify(candidateSchema.parse(row.candidate)) === JSON.stringify(candidate))) return false;
+    return true;
+  }).map(([, candidate]) => candidate);
 }
 
 function document(name: string, label: string, candidates: ImportCandidate[]): ParsedDocument {
@@ -140,24 +166,25 @@ function document(name: string, label: string, candidates: ImportCandidate[]): P
 }
 
 /** Stages the movements through the existing document review and confirms only the plain, unambiguous ones. */
-async function stageAndApply(prisma: PrismaClient, actor: ImportActor, accountId: string, name: string, label: string, candidates: ImportCandidate[]) {
+async function stageAndApply(prisma: PrismaClient, actor: ImportActor, accountId: string, name: string, label: string, candidates: ImportCandidate[], credit = false) {
   // Serializable transactions can be refused when the person edits the ledger at the same moment. Nothing was saved in that
   // case and the whole step is idempotent, so it is simply run again.
   for (let attempt = 1; ; attempt += 1) {
-    try { return await stageAndApplyOnce(prisma, actor, accountId, name, label, candidates); }
+    try { return await stageAndApplyOnce(prisma, actor, accountId, name, label, candidates, credit); }
     catch (error) {
       if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") || attempt >= 3) throw error;
       await new Promise(resolve => setTimeout(resolve, 150 * attempt));
     }
   }
 }
-async function stageAndApplyOnce(prisma: PrismaClient, actor: ImportActor, accountId: string, name: string, label: string, candidates: ImportCandidate[]) {
+async function stageAndApplyOnce(prisma: PrismaClient, actor: ImportActor, accountId: string, name: string, label: string, candidates: ImportCandidate[], credit: boolean) {
   return runFinancialImport(prisma, async db => {
     const ids = await stageFinancialDocuments(db, actor, accountId, [document(name, label, candidates)]);
     const preview = await previewFinancialEvidence(db, actor, ids);
     const creatable = preview.rows.filter(row => row.action === "CREATE" && row.candidate.confidence === "CONFIRMED" && !row.candidate.problems.length && AUTO_CREATE_KINDS.has(row.candidate.eventKind));
     let autoCreated = 0;
     if (creatable.length) autoCreated = (await confirmFinancialEvidence(db, actor, ids, preview.token, creatable.map(row => ({ id: row.id, action: "CREATE" as const })))).created;
+    if (credit) await db.financialEvidence.updateMany({ where: { workspaceId: actor.workspaceId, source: { accountId }, sourceId: { notIn: ids }, locator: { in: candidates.map(row => row.locator) }, decision: "NEEDS_REVIEW", version: 1, reviewedByUserId: null }, data: { decision: "IGNORE", reason: "Substituída por atualização do banco; a evidência original foi preservada.", version: { increment: 1 } } });
     // A row that only mirrors a transfer the person already registered is settled, not pending: it leaves the review.
     const keptIds = preview.rows.filter(row => row.action === "KEEP").map(row => row.id);
     if (keptIds.length) await db.financialEvidence.updateMany({ where: { workspaceId: actor.workspaceId, id: { in: keptIds }, decision: "NEEDS_REVIEW" }, data: { decision: "IGNORE", reason: "Já registrado como transferência entre suas contas.", reviewedByUserId: actor.userId, reviewedAt: new Date(), version: { increment: 1 } } });
