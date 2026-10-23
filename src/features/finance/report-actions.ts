@@ -6,14 +6,17 @@ import { financeOverview } from "./overview-query";
 import { cardStatementRows } from "./queries";
 import { buildFinancialReport } from "./financial-report";
 import { financialPlanningData } from "./planning/query";
+import { currentFinanceOrigin } from "./data-origin-request";
+import { transactionOriginWhere, transactionOriginLabel } from "./data-origin";
 const day=(value:Date|null)=>value?.toISOString().slice(0,10)||null;
 export async function exportFinancialReport(){
   const ctx=await requirePermission("READ");
   if(ctx.role!=="OWNER")return {error:"O relatório completo, incluindo faturas privadas, está disponível somente ao titular."};
+  const origin=await currentFinanceOrigin();
   const today=dayKey(new Date(),ctx.workspace.timezone);
   const [overview,statements,transactions,debts,subscriptions,goals,investments,payments,pending,planning]=await Promise.all([
-    financeOverview(ctx.workspaceId,today,{statementViewer:ctx}),cardStatementRows(ctx),
-    prisma.financeTransaction.findMany({where:{workspaceId:ctx.workspaceId},include:{account:{select:{name:true}},destinationAccount:{select:{name:true}},category:{select:{name:true}}},orderBy:[{date:"asc"},{id:"asc"}]}),
+    financeOverview(ctx.workspaceId,today,{statementViewer:ctx,origin}),cardStatementRows(ctx,origin),
+    prisma.financeTransaction.findMany({where:{workspaceId:ctx.workspaceId,AND:transactionOriginWhere(origin)},include:{account:{select:{name:true}},destinationAccount:{select:{name:true}},category:{select:{name:true}},evidence:{where:{decision:"COMMITTED"},select:{source:{select:{fileName:true}}}}},orderBy:[{date:"asc"},{id:"asc"}]}),
     prisma.debt.findMany({where:{workspaceId:ctx.workspaceId},orderBy:{name:"asc"}}),
     prisma.subscription.findMany({where:{workspaceId:ctx.workspaceId},include:{account:{select:{name:true}}},orderBy:{name:"asc"}}),
     prisma.savingsGoal.findMany({where:{workspaceId:ctx.workspaceId},orderBy:{name:"asc"}}),
@@ -23,9 +26,10 @@ export async function exportFinancialReport(){
     financialPlanningData(ctx,today,today.slice(0,7)+"-01",12),
   ]);
   return {report:buildFinancialReport(overview,{
+    origin,
     planning,
     statements:statements.sort((a,b)=>(a.dueDate||a.referenceMonth||"").localeCompare(b.dueDate||b.referenceMonth||"")),
-    transactions:transactions.map((t)=>({...t,date:day(t.date)!,postedDate:day(t.postedDate),purchasedDate:day(t.purchasedDate),occurredAt:t.occurredAt?.toISOString()||null,account:t.account.name,destination:t.destinationAccount?.name||null,category:t.category?.name||null})),
+    transactions:transactions.map((t)=>({...t,originLabel:transactionOriginLabel(t),date:day(t.date)!,postedDate:day(t.postedDate),purchasedDate:day(t.purchasedDate),occurredAt:t.occurredAt?.toISOString()||null,account:t.account.name,destination:t.destinationAccount?.name||null,category:t.category?.name||null})),
     debts:debts.map((d)=>({...d,targetPayoffDate:day(d.targetPayoffDate)})),
     subscriptions:subscriptions.map((s)=>({...s,nextChargeDate:day(s.nextChargeDate)!,account:s.account?.name||null})),
     goals:goals.map((g)=>({...g,targetDate:day(g.targetDate)})),

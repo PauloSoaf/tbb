@@ -36,7 +36,7 @@ export function LedgerView({ rows, accounts, categories, timeZone, invalid, onUp
       : <details className="ledger-row" key={row.id} data-invalid={invalid.has(row.id) || undefined}>
         <summary className="list-item">
           <div><h3>{row.description}</h3><small>{row.date} · {accountName(row.accountId)} · {categoryName(row.categoryId)}</small>{hasNote(row.notes) && <small className="ledger-note-preview"><StickyNote size={12} aria-hidden="true"/>{notePreview(row.notes, 90)}</small>}</div>
-          <div className="text-right"><strong className={amountClass(row.type)}>{row.type === "EXPENSE" ? "− " : "+ "}{row.amount}</strong><small className="block">{row.source}</small></div>
+          <div className="text-right"><strong className={amountClass(row.type)}>{row.type === "EXPENSE" ? "− " : "+ "}{row.amount}</strong><small className="block">{row.originLabel || row.source}</small></div>
         </summary>
         <div className="ledger-details">
           <dl className="transaction-facts">

@@ -17,6 +17,8 @@ import { configureAllAccounts, syncEverything } from "../setup";
 import { latestCreditBills } from "../credit-bills";
 import type { PluggyAccount, PluggyTransaction, PluggyBill } from "../pluggy-schemas";
 import type { PluggyClient } from "../pluggy-client";
+import { transactionOriginWhere, transactionOriginSql } from "@/features/finance/data-origin";
+import { Prisma } from "@prisma/client";
 
 const NOW = new Date("2032-10-20T16:00:00Z"), DUE = "2032-11-03";
 describe.skipIf(!process.env.FINANCE_PLANNING_TEST_DB_URL)("default full-history setup", () => {
@@ -61,6 +63,33 @@ describe.skipIf(!process.env.FINANCE_PLANNING_TEST_DB_URL)("default full-history
     expect(await syncEverything(deps, actor, connectionId)).toMatchObject({ status: "SUCCESS", created: 0, autoCreated: 0 });
     expect(await ledger()).toHaveLength(count);
     expect(await cash()).toBe(99500);
+  });
+
+  it("links an exact bank occurrence to its original file entry and filters both sources without double counting", async () => {
+    const purchase = transactions.bank[1];
+    const original = await prisma.financeTransaction.create({ data: { workspaceId: actor.workspaceId, accountId: bankId, source: "CSV", type: "EXPENSE", description: purchase.description!, date: new Date(purchase.date), amountCents: Math.round(Math.abs(purchase.amount) * 100) } });
+    expect(await syncEverything(deps, actor, connectionId)).toMatchObject({ status: "SUCCESS" });
+    expect(await prisma.financeTransaction.count({ where: { workspaceId: actor.workspaceId, description: purchase.description! } })).toBe(1);
+    expect(await prisma.financialEvidence.count({ where: { workspaceId: actor.workspaceId, transactionId: original.id, decision: "COMMITTED" } })).toBe(1);
+    for (const origin of ["combined", "imported", "open-finance", "manual"] as const) {
+      const orm = await prisma.financeTransaction.findMany({ where: { workspaceId: actor.workspaceId, AND: transactionOriginWhere(origin) }, select: { id: true }, orderBy: { id: "asc" } });
+      const sql = await prisma.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT id FROM "FinanceTransaction" WHERE "workspaceId"=${actor.workspaceId} AND ${transactionOriginSql(origin)} ORDER BY id`);
+      expect(sql).toEqual(orm);
+      expect(orm.some(row => row.id === original.id)).toBe(origin !== "manual");
+    }
+    expect(await cash()).toBe(99500);
+    expect(await syncEverything(deps, actor, connectionId)).toMatchObject({ autoCreated: 0 });
+  });
+
+  it("reuses a credit purchase confirmed by both sources, including replay without a published invoice", async () => {
+    const original = await prisma.financeTransaction.create({ data: { workspaceId: actor.workspaceId, accountId: cardId, source: "CSV", type: "EXPENSE", description: "Synthetic exact card purchase", date: new Date("2032-10-15"), amountCents: 1000, cardStatementId: statementId, statementDetailMode: "ALREADY_INCLUDED" } });
+    transactions.card = [{ id: "exact-card", description: original.description, amount: 10, type: "DEBIT", status: "POSTED", currencyCode: "BRL", date: "2032-10-15", creditCardMetadata: { billId: "current" } }];
+    expect(await syncEverything(deps, actor, connectionId)).toMatchObject({ status: "SUCCESS", needsReview: 0 });
+    expect(await prisma.financeTransaction.count({where:{workspaceId:actor.workspaceId,accountId:cardId}})).toBe(1);
+    expect(await prisma.financialEvidence.count({where:{workspaceId:actor.workspaceId,transactionId:original.id,decision:"COMMITTED"}})).toBe(1);
+    bills=[];
+    expect(await syncEverything(deps, actor, connectionId)).toMatchObject({ status: "SUCCESS", autoCreated: 0, needsReview: 0 });
+    expect(await prisma.financeTransaction.count({where:{workspaceId:actor.workspaceId,accountId:cardId}})).toBe(1);
   });
 
   it("clears an old date cursor when expanding a previously limited link", async () => {
@@ -118,11 +147,11 @@ describe.skipIf(!process.env.FINANCE_PLANNING_TEST_DB_URL)("default full-history
     expect(await prisma.openFinanceAccountLink.findFirst({ where: { connectionId, kind: "BANK" } })).toMatchObject({ isEnabled: false, syncFromDate: new Date("2032-10-17") });
   });
 
-  it("full sync reconciles a proven current balance once without fabricating or duplicating payments", async () => {
+  it("full sync preserves the invoice and payments when only used credit limit is published", async () => {
     bills = []; products[1].balance = 90;
     await prisma.cardStatementPayment.create({ data: { workspaceId: actor.workspaceId, accountId: cardId, cardStatementId: statementId, amountCents: 2000, date: new Date("2032-10-15"), sourceId: "synthetic-manual", locator: "payment", fingerprint: randomUUID() } });
     expect(await syncEverything(deps, actor, connectionId)).toMatchObject({ status: "SUCCESS" });
-    expect(await prisma.cardStatement.findUnique({ where: { id: statementId } })).toMatchObject({ amountCents: 11000, status: "OPEN" });
+    expect(await prisma.cardStatement.findUnique({ where: { id: statementId } })).toMatchObject({ amountCents: 10000, status: "OPEN" });
     expect((await latestCreditBills(prisma, actor.workspaceId)).filter(row => row.kind === "OPEN_FINANCE_BILL_REVIEW")).toHaveLength(0);
     expect(await prisma.cardStatementPayment.count({ where: { workspaceId: actor.workspaceId } })).toBe(1);
     expect(await syncEverything(deps, actor, connectionId)).toMatchObject({ status: "SUCCESS", autoCreated: 0 });

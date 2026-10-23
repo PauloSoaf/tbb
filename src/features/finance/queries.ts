@@ -6,6 +6,7 @@ import { summarizeCardStatements, type StatementRow } from "@/features/finance/c
 import { buildProvenance } from "@/features/finance/statement-provenance";
 import { outstandingOf } from "@/features/finance/statement-payment";
 import { calculateCreditCardLimitBreakdown, cardLimitInput, type CardLedger } from "@/features/finance/credit-limit";
+import { transactionOriginWhere, transactionOriginSql, type FinanceOrigin } from "./data-origin";
 
 const dayOf = (value: Date | null) => (value ? value.toISOString().slice(0, 10) : null);
 
@@ -17,11 +18,15 @@ export const canReadCardStatements = (viewer: StatementViewer) => viewer.role ==
 
 /** Bills of the viewer's workspace. `amountCents` is the bill total: the declared amount plus the
  * card expenses added on top of it; already-included expenses only count as detail. */
-export async function cardStatementRows(viewer: StatementViewer): Promise<StatementRow[]> {
+export async function cardStatementRows(viewer: StatementViewer, origin: FinanceOrigin = "combined"): Promise<StatementRow[]> {
   if (!canReadCardStatements(viewer)) return [];
+  const confirmedSources = origin === "combined" ? [] : await prisma.financialSnapshot.findMany({ where: { workspaceId: viewer.workspaceId, kind: "OPEN_FINANCE_BILL", statementId: { not: null } }, select: { statementId: true, payload: true } });
+  const fromBank = confirmedSources.filter(row => (row.payload as { bill?: { basis?: string } }).bill?.basis !== "ACCOUNT_BALANCE").flatMap(row => row.statementId ? [row.statementId] : []);
+  const fromImport = confirmedSources.filter(row => ["MANUAL_IMPORT", "VERIFIED_DOCUMENT"].includes((row.payload as { previous?: { source?: string } }).previous?.source ?? "")).flatMap(row => row.statementId ? [row.statementId] : []);
+  const sourceWhere = origin === "combined" ? {} : origin === "open-finance" ? { OR: [{ source: "OPEN_FINANCE" }, { id: { in: fromBank } }] } : origin === "imported" ? { OR: [{ source: { in: ["MANUAL_IMPORT", "VERIFIED_DOCUMENT"] } }, { id: { in: fromImport } }] } : { source: { notIn: ["MANUAL_IMPORT", "VERIFIED_DOCUMENT", "OPEN_FINANCE"] }, id: { notIn: [...fromBank, ...fromImport] } };
   const [rows, linked, verifications] = await Promise.all([
     prisma.cardStatement.findMany({
-      where: { workspaceId: viewer.workspaceId },
+      where: { workspaceId: viewer.workspaceId, ...sourceWhere },
       select: { id: true, createdAt: true, updatedAt: true, source: true, accountId: true, kind: true, status: true, amountCents: true, dueDate: true, closingDate: true, closingDay: true, referenceMonth: true, paidAt: true, sourceAsOf: true, reconciliation: true, overlapsStatementId: true, notes: true, rolledIntoStatementId: true, amountIsOutstanding: true, payments: { select: { id: true, amountCents: true, date: true, bankReconciliation: true, bankTransactionId: true } }, account: { select: { name: true } } },
     }),
     prisma.financeTransaction.findMany({
@@ -62,15 +67,16 @@ export async function cardStatementOverview(viewer: StatementViewer, today: stri
 type PositionAccount = { id: string; name: string; institution: string | null; creditLimitCents: number | null; closingDay: number | null; dueDay: number | null; initialBalanceCents: number };
 type PositionMovement = { accountId: string; type: string; _sum: { amountCents: number | null } };
 type PositionIncoming = { destinationAccountId: string | null; _sum: { amountCents: number | null } };
-export async function creditCardPositions(workspaceId: string, today: string, statementRows: StatementRow[], seed: { accounts?: PositionAccount[]; originThroughToday?: PositionMovement[]; incomingThroughToday?: PositionIncoming[] } = {}) {
-  const onCards = { workspaceId, source: { not: "QUICK_INCOME" }, account: { type: "CREDIT_CARD" as const, isArchived: false } };
+export async function creditCardPositions(workspaceId: string, today: string, statementRows: StatementRow[], seed: { accounts?: PositionAccount[]; originThroughToday?: PositionMovement[]; incomingThroughToday?: PositionIncoming[]; origin?: FinanceOrigin } = {}) {
+  const originFilter = seed.origin ?? "combined";
+  const onCards = { workspaceId, source: { not: "QUICK_INCOME" }, account: { type: "CREDIT_CARD" as const, isArchived: false }, AND: transactionOriginWhere(originFilter) };
   const [cards, origin, incoming, future, unlinked] = await Promise.all([
     seed.accounts ? Promise.resolve(seed.accounts) : prisma.account.findMany({
       where: { workspaceId, type: "CREDIT_CARD", isArchived: false },
       select: { id: true, name: true, institution: true, creditLimitCents: true, closingDay: true, dueDay: true, initialBalanceCents: true },
       orderBy: { createdAt: "asc" },
     }),
-    seed.originThroughToday ? Promise.resolve(seed.originThroughToday) : prisma.financeTransaction.groupBy({ by: ["accountId", "type"], where: { ...onCards, date: { lt: dateKeyToUTC(addDays(today, 1)) } }, _sum: { amountCents: true } }),
+    seed.originThroughToday && originFilter === "combined" ? Promise.resolve(seed.originThroughToday) : prisma.financeTransaction.groupBy({ by: ["accountId", "type"], where: { ...onCards, date: { lt: dateKeyToUTC(addDays(today, 1)) } }, _sum: { amountCents: true } }),
     seed.incomingThroughToday ? Promise.resolve(seed.incomingThroughToday) : prisma.financeTransaction.groupBy({ by: ["destinationAccountId"], where: { workspaceId, type: "TRANSFER", destinationAccount: { type: "CREDIT_CARD", isArchived: false }, date: { lt: dateKeyToUTC(addDays(today, 1)) } }, _sum: { amountCents: true } }),
     prisma.financeTransaction.groupBy({ by: ["accountId", "type"], where: { ...onCards, type: { in: ["EXPENSE", "REFUND"] }, date: { gte: dateKeyToUTC(addDays(today, 1)) } }, _sum: { amountCents: true } }),
     prisma.financeTransaction.findMany({
@@ -116,7 +122,7 @@ export async function financeSummary(workspaceId: string, today: string) {
   return {accounts:accountBalances,income,monthlyIncome:monthlyIncome?.amountCents||0,expenses,savings:income-expenses,savingsRate:income?Math.round((income-expenses)/income*100):0,subscriptionMonthly,debtCents:debts._sum.remainingBalanceCents||0,savingsCurrent:savings._sum.currentAmountCents||0,savingsTarget:savings._sum.targetAmountCents||0,netWorth:accountBalances.filter(account=>!isUnassignedAccount(account)).reduce((sum,a)=>sum+a.balanceCents,0)-(debts._sum.remainingBalanceCents||0)};
 }
 
-export async function monthlyCashFlow(workspaceId: string, months=6, today=new Date().toISOString().slice(0,10)) {
+export async function monthlyCashFlow(workspaceId: string, months=6, today=new Date().toISOString().slice(0,10), origin:FinanceOrigin="combined") {
   const [year,month]=today.split("-").map(Number);
   const monthKeys=Array.from({length:months},(_,index)=>{
     const date=new Date(Date.UTC(year,month-1-(months-1-index),1));
@@ -126,7 +132,7 @@ export async function monthlyCashFlow(workspaceId: string, months=6, today=new D
   const until=dateKeyToUTC(addDays(today,1));
   const rows=await prisma.$queryRaw<Array<{month:Date;type:string;total:bigint}>>(Prisma.sql`
     SELECT date_trunc('month', "date") AS month, "type"::text AS type, SUM("amountCents")::bigint AS total
-    FROM "FinanceTransaction" WHERE "workspaceId"=${workspaceId} AND "source"<>'QUICK_INCOME' AND "isConsumption"=true AND "date">=${from} AND "date"<${until}
+    FROM "FinanceTransaction" WHERE "workspaceId"=${workspaceId} AND "source"<>'QUICK_INCOME' AND "isConsumption"=true AND "date">=${from} AND "date"<${until} AND ${transactionOriginSql(origin)}
     GROUP BY 1,2 ORDER BY 1 ASC`);
   const map=new Map(monthKeys.map(key=>[key,{month:key,income:0,expenses:0}]));
   for(const row of rows){const key=row.month.toISOString().slice(0,7);const item=map.get(key)||{month:key,income:0,expenses:0};if(row.type==="INCOME"||row.type==="REFUND")item.income+=Number(row.total)/100;if(row.type==="EXPENSE")item.expenses+=Number(row.total)/100;map.set(key,item);}
@@ -137,14 +143,14 @@ export async function spendingByCategory(workspaceId: string, from: Date) {
   return prisma.financeTransaction.groupBy({by:["categoryId"],where:{workspaceId,type:"EXPENSE",isConsumption:true,date:{gte:from}},_sum:{amountCents:true},orderBy:{_sum:{amountCents:"desc"}},take:8});
 }
 
-export async function financeAnalytics(workspaceId:string,today:string){
+export async function financeAnalytics(workspaceId:string,today:string,origin:FinanceOrigin="combined"){
   const from=addDays(today,-111);
   const range={gte:dateKeyToUTC(from),lt:dateKeyToUTC(addDays(today,1))};
   const todayDate=dateKeyToUTC(today);
   const monthRange={gte:dateKeyToUTC(startOfMonth(today)),lt:dateKeyToUTC(addDays(today,1))};
   const [categoryTotals,dailyTotals,categoryNames,creditAccounts,budgets,subscriptions,debts]=await Promise.all([
-    prisma.financeTransaction.groupBy({by:["categoryId"],where:{workspaceId,type:"EXPENSE",isConsumption:true,date:range},_sum:{amountCents:true},orderBy:{_sum:{amountCents:"desc"}},take:7}),
-    prisma.financeTransaction.groupBy({by:["date"],where:{workspaceId,type:"EXPENSE",isConsumption:true,date:range},_sum:{amountCents:true},orderBy:{date:"asc"}}),
+    prisma.financeTransaction.groupBy({by:["categoryId"],where:{workspaceId,type:"EXPENSE",isConsumption:true,date:range,AND:transactionOriginWhere(origin)},_sum:{amountCents:true},orderBy:{_sum:{amountCents:"desc"}},take:7}),
+    prisma.financeTransaction.groupBy({by:["date"],where:{workspaceId,type:"EXPENSE",isConsumption:true,date:range,AND:transactionOriginWhere(origin)},_sum:{amountCents:true},orderBy:{date:"asc"}}),
     prisma.financeCategory.findMany({where:{workspaceId,isArchived:false},select:{id:true,name:true,color:true}}),
     prisma.account.findMany({where:{workspaceId,isArchived:false,type:"CREDIT_CARD"},select:{id:true,name:true,institution:true,creditLimitCents:true,dueDay:true,transactions:{where:{date:monthRange,isConsumption:true,type:{in:["EXPENSE","REFUND"]}},select:{type:true,amountCents:true}}},orderBy:{createdAt:"asc"}}),
     prisma.budget.findMany({where:{workspaceId,kind:"CATEGORY_BUDGET",startDate:{lte:todayDate},endDate:{gte:todayDate}},include:{category:{select:{name:true,color:true}}},orderBy:{limitCents:"desc"}}),

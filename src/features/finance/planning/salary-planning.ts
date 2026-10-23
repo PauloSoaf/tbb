@@ -5,9 +5,10 @@ import { monthKeys, type SalaryPlanView, type StatementLite } from "../salary-pl
 import { buildFinancialForecast, type ForecastAccount, type ForecastFixed, type ForecastSubscription } from "./forecast";
 import { spendingLimitUsage, type Limit } from "./spending-limits";
 import type { GoalPlan } from "./goals";
+import { transactionOriginWhere, type FinanceOrigin } from "../data-origin";
 
 /** Same projection engine as the dedicated screen; no full ledger is serialized to the dashboard. */
-export async function addSalaryPlanning(workspaceId: string, today: string, salary: SalaryPlanView, input: { accounts: ForecastAccount[]; fixed: ForecastFixed[]; subscriptions: ForecastSubscription[]; statements: StatementLite[]; goals: GoalPlan[]; incomeCents: number | null }) {
+export async function addSalaryPlanning(workspaceId: string, today: string, salary: SalaryPlanView, input: { accounts: ForecastAccount[]; fixed: ForecastFixed[]; subscriptions: ForecastSubscription[]; statements: StatementLite[]; goals: GoalPlan[]; incomeCents: number | null }, origin: FinanceOrigin = "combined") {
   const months = salary.months.map(row => row.month), start = dateOnly(months[0] + "-01"), end = dateOnly(monthKeys(months.at(-1)! + "-01", 3)[2] + "-01");
   const [overrides, budgets] = await Promise.all([
     prisma.monthlyFinancialPlan.findMany({ where: { workspaceId, month: { gte: months[0], lte: months.at(-1)! } } }),
@@ -16,7 +17,7 @@ export async function addSalaryPlanning(workspaceId: string, today: string, sala
   if (!overrides.length && !budgets.length && !input.goals.some(goal => goal.targetDate || goal.monthlyContributionCents)) return salary;
   const previousStart = dateOnly(new Date(Date.UTC(Number(months[0].slice(0,4)), Number(months[0].slice(5,7))-2, 1)).toISOString().slice(0,10));
   const baseline = budgets.reduce((day, row) => row.startDate < day ? row.startDate : day, previousStart);
-  const transactionRows = await prisma.financeTransaction.findMany({ where: { workspaceId, currency: "BRL", source: { not: "QUICK_INCOME" }, OR: [{ date: { gte: baseline, lt: end } }, { purchasedDate: { gte: baseline, lt: end } }] }, take: 50001, orderBy: { id: "asc" } });
+  const transactionRows = await prisma.financeTransaction.findMany({ where: { workspaceId, currency: "BRL", source: { not: "QUICK_INCOME" }, OR: [{ date: { gte: baseline, lt: end } }, { purchasedDate: { gte: baseline, lt: end } }], AND: transactionOriginWhere(origin) }, take: 50001, orderBy: { id: "asc" } });
   const day = (value: Date | null) => value?.toISOString().slice(0, 10) ?? null;
   const transactions = transactionRows.slice(0, 50000).map(row => ({ ...row, date: day(row.date)!, purchasedDate: day(row.purchasedDate), occurredAt: row.occurredAt?.toISOString() ?? null, createdAt: row.createdAt.toISOString() }));
   const limits = budgets.map(row => { const limit: Limit = { ...row, startDate: day(row.startDate)!, endDate: day(row.endDate)!, baselineAt: row.baselineAt?.toISOString() ?? null, baselineDate: day(row.baselineDate) }; return { limit, decisions: row.transactionReviews, remainingCents: spendingLimitUsage(limit, transactions, row.transactionReviews, today, row.recurring ? today.slice(0, 7) : undefined).remainingCents }; });

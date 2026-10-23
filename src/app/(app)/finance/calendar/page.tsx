@@ -1,4 +1,5 @@
 import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
+import { currentFinanceOrigin } from "@/features/finance/data-origin-request";
 import { cookies } from "next/headers";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FinanceSpendingCalendar } from "@/features/finance/FinanceSpendingCalendar";
@@ -12,6 +13,7 @@ import type { Locale } from "@/lib/i18n/messages";
 
 export default async function SpendingCalendarPage({ searchParams }: { searchParams: Promise<{ month?: string; day?: string }> }) {
   const context = await requirePermission("READ");
+  const origin = await currentFinanceOrigin();
   const stored = (await cookies()).get("NEXT_LOCALE")?.value;
   const locale: Locale = stored === "en" || stored === "es" ? stored : "pt";
   const copy = (key: CalendarCopyKey) => calendarCopy[locale][key];
@@ -19,9 +21,9 @@ export default async function SpendingCalendarPage({ searchParams }: { searchPar
   const today = dayKey(new Date(), context.workspace.timezone);
   const { month, day } = calendarSelection(params.month, params.day, today);
   const [calendar, options, rows, canWrite] = await Promise.all([
-    financeCalendarMonth(context.workspaceId, month, context.role === "OWNER"),
+    financeCalendarMonth(context.workspaceId, month, context.role === "OWNER", origin),
     financeCalendarOptions(context.workspaceId),
-    cardStatementRows(context),
+    cardStatementRows(context, origin),
     financeCalendarCanWrite(),
   ]);
   return <FinancePrivacyBoundary canWrite={canWrite}><div className="stack">

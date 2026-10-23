@@ -11,6 +11,7 @@ export type FinanceCalendarEntry = {
   type: CalendarTransactionType;
   source: string;
   importOrigin?: "OPEN_FINANCE";
+  originLabel?: string;
   accountName: string;
   categoryName: string | null;
   isCardPurchase: boolean;

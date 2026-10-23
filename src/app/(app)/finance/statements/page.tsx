@@ -1,5 +1,7 @@
 
 import { FinanceWriteOnly } from "@/features/finance/FinanceWriteAccess";
+import { currentFinanceOrigin } from "@/features/finance/data-origin-request";
+import { transactionOriginWhere } from "@/features/finance/data-origin";
 import { financePageAccess } from "@/features/finance/finance-page-access";
 import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import Link from "next/link";
@@ -32,14 +34,15 @@ export default async function CardStatementsPage() {
     <PageHeader eyebrow="MONEY · FATURAS" title="Faturas dos cartões."/>
     <div className="panel"><EmptyState title="Faturas visíveis só para o titular" description="As faturas de cartão deste espaço são dados pessoais do titular e não aparecem para outros membros."/></div>
   </div></FinancePrivacyBoundary>;
+  const origin = await currentFinanceOrigin();
 
   const today = dayKey(new Date(), c.workspace.timezone);
-  const rows = await cardStatementRows(c);
+  const rows = await cardStatementRows(c, origin);
   const [positions, incomeCents, categories, linked, bankLimits, bankAccounts, bankTransactions] = await Promise.all([
-    creditCardPositions(c.workspaceId, today, rows),
+    creditCardPositions(c.workspaceId, today, rows, { origin }),
     monthlyIncomeReference(c.workspaceId, today),
     prisma.financeCategory.findMany({ where: { workspaceId: c.workspaceId, isArchived: false, type: "EXPENSE" }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
-    prisma.financeTransaction.findMany({ where: { workspaceId: c.workspaceId, cardStatementId: { not: null }, type: { in: ["EXPENSE", "REFUND"] } }, select: { id: true, description: true, merchant: true, amountCents: true, date: true, cardStatementId: true, statementDetailMode: true, type: true, eventKind: true, postedDate: true, occurredAt: true, occurredTimezone: true }, orderBy: [{ date: "desc" }, { createdAt: "desc" }] }),
+    prisma.financeTransaction.findMany({ where: { workspaceId: c.workspaceId, cardStatementId: { in: rows.map(row => row.id) }, type: { in: ["EXPENSE", "REFUND"] }, AND: transactionOriginWhere(origin) }, select: { id: true, description: true, merchant: true, amountCents: true, date: true, cardStatementId: true, statementDetailMode: true, type: true, eventKind: true, postedDate: true, occurredAt: true, occurredTimezone: true }, orderBy: [{ date: "desc" }, { createdAt: "desc" }] }),
     prisma.financialSnapshot.findMany({ where: { workspaceId: c.workspaceId, kind: "BANK_CREDIT_LIMIT" }, select: { accountId: true, asOfDate: true, payload: true }, orderBy: [{ asOfDate: "desc" }, { createdAt: "desc" }], take: 100 }),
     prisma.account.findMany({ where: { workspaceId: c.workspaceId, isArchived: false, type: { in: ["CHECKING", "SAVINGS", "CASH", "DIGITAL_WALLET"] } }, select: { id: true, name: true } }),
     prisma.financeTransaction.findMany({ where: { workspaceId: c.workspaceId, account: { type: { in: ["CHECKING", "SAVINGS", "CASH", "DIGITAL_WALLET"] } }, OR: [{ type: "TRANSFER", destinationAccount: { type: "CREDIT_CARD" } }, { type: "EXPENSE", isConsumption: false, eventKind: { in: ["CARD_SETTLEMENT", "CARD_PAYMENT"] } }], date: { lte: new Date(`${today}T00:00:00Z`) }, bankStatementPayment: null }, select: { id: true, accountId: true, destinationAccountId: true, amountCents: true, date: true, description: true }, orderBy: { date: "desc" }, take: 100 }),

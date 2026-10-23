@@ -3,12 +3,14 @@ import type { FinanceOverviewData } from "./overview-query";
 import { money } from "./money";
 import { personalAssetCopy } from "./personal-asset-copy";
 import type { FinancialPlanningData } from "./planning/query";
+import { ORIGIN_LABELS, type FinanceOrigin } from "./data-origin-core";
 
 type LedgerRow={date:string;description:string;type:string;amountCents:number;account:string;destination:string|null;category:string|null;source:string;statementDetailMode:string|null;installmentNumber:number|null;installmentTotal:number|null;recurring:boolean;merchant:string|null;notes:string|null;postedDate?:string|null;purchasedDate?:string|null;occurredAt?:string|null;occurredTimezone?:string|null;eventKind?:string;isConsumption?:boolean;originalCurrency?:string|null;originalAmountCents?:number|null;exchangeRate?:string|null};
 type ReportRows={
+  origin?: FinanceOrigin;
   planning?: Pick<FinancialPlanningData, "forecast" | "limits">;
   statements:StatementRow[];
-  transactions:LedgerRow[];
+  transactions:(LedgerRow & {originLabel?:string})[];
   debts:{name:string;status:string;remainingBalanceCents:number;originalAmountCents:number;minimumPaymentCents:number;dueDay:number|null;interestBasisPoints:number;ratePeriod:string;targetPayoffDate:string|null}[];
   subscriptions:{name:string;status:string;amountCents:number;billingCycle:string;nextChargeDate:string;account:string|null;nextChargeIsEstimate?:boolean;amountIsEstimate?:boolean;originalCurrency?:string|null;originalAmountCents?:number|null}[];
   payments?:{account:string;date:string|null;amountCents:number;statement:string|null}[];
@@ -23,6 +25,7 @@ export function buildFinancialReport(data:FinanceOverviewData,rows:ReportRows){
   const sections=[
     "# TBB — Relatório completo da vida financeira",
     `Data de referência: ${data.today}. Valores em BRL. Retrato dos registros do seu espaço pessoal na data da exportação.`,
+    `Origem exibida: ${ORIGIN_LABELS[rows.origin??"combined"]}. Lançamentos, gráficos e faturas respeitam este filtro; saldos atuais e planejamento permanecem como referência. Fontes conciliadas representam um único lançamento.`,
     "## Resumo atual",
     table(["Indicador","Valor"],[['Saldo atual em contas (dinheiro)',money(m.cashBalanceCents)],['Cofrinhos e poupança (separados)',money(m.reserveBalanceCents)],['Patrimônio líquido estimado',money(m.netWorthCents)],['Receitas efetivamente registradas no mês',money(m.incomeCents)],['Despesas registradas no mês',money(m.expensesCents)],['Resultado do mês (receitas menos despesas)',money(m.balanceCents)],['Renda mensal prevista (não recebimento)',money(data.monthlyIncome.amountCents)],['Dia previsto da renda',data.monthlyIncome.payDay||'Não informado'],['Conta prevista para receber',data.monthlyIncome.accountName],['Gastos fixos mensais previstos',money(m.fixedCents)],['Variáveis registrados',money(m.variableCents)],['Sobra da renda prevista (não saldo)',money(m.availableCents)],['Faturas abertas',money(m.openInvoicesCents)],['Dívidas efetivas ativas',money(m.debtCents)]]),
     "## Contas e reservas por banco",
@@ -66,6 +69,8 @@ export function buildFinancialReport(data:FinanceOverviewData,rows:ReportRows){
     table(['Data','Situação','Tipo','Descrição','Estabelecimento','Valor','Conta','Destino','Categoria','Recorrente','Parcela','Vínculo à fatura','Observações'],rows.transactions.map((t)=>[t.date,t.source==='QUICK_INCOME'?'Previsão de renda antiga, sem confirmação':t.date>data.today?'Futuro, fora do saldo atual':'Registrado até hoje',t.type,t.description,t.merchant,money(t.amountCents),t.account,t.destination,t.category,t.recurring?'Sim':'Não',t.installmentTotal?`${t.installmentNumber}/${t.installmentTotal}`:'—',t.statementDetailMode,t.notes])),
     "### Datas, horários e valores originais das importações",
     table(['Evento','Data efetiva','Compra original','Postagem','Hora UTC','Timezone','Natureza','Consumo','Moeda original','Valor original','Cotação'],rows.transactions.filter(t=>t.source==='DOCUMENT_V2').map(t=>[t.description,t.date,t.purchasedDate,t.postedDate,t.occurredAt,t.occurredTimezone,t.eventKind,t.isConsumption===false?'Fora do consumo':'Sim',t.originalCurrency,t.originalAmountCents&&t.originalCurrency?money(t.originalAmountCents,t.originalCurrency):null,t.exchangeRate])),
+    "## Origem de cada lançamento",
+    table(["Data","Descrição","Origem"],rows.transactions.map(t=>[t.date,t.description,t.originLabel??t.source])),
     "## Ocorrências ainda em revisão",
     table(['Original','Localizador','Motivo'],(rows.pending||[]).map(p=>[p.fileName,p.locator,p.reason])),
     "## Critérios e limites da projeção",

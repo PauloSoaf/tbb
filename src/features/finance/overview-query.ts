@@ -13,6 +13,7 @@ import { personalAssetRows } from "./personal-asset-query";
 import { netWorthWithPersonalAssets } from "./personal-assets";
 import { pendingBankLiability } from "./planning/bank-settlement";
 import { addSalaryPlanning } from "./planning/salary-planning";
+import { transactionOriginSql, transactionOriginWhere, type FinanceOrigin } from "./data-origin";
 
 export type FinanceOverviewData = Awaited<ReturnType<typeof financeOverview>>;
 
@@ -50,7 +51,9 @@ function nextSubscriptionDate(initial: Date, cycle: string, customDays: number |
 
 // Card statements are private to the session's owner: they are read only when that owner asks for
 // their own workspace, so partner and together scopes never see them.
-export async function financeOverview(workspaceId: string, today: string, options: { statementViewer?: StatementViewer } = {}) {
+export async function financeOverview(workspaceId: string, today: string, options: { statementViewer?: StatementViewer; origin?: FinanceOrigin } = {}) {
+  const origin = options.origin ?? "combined";
+  const originWhere = transactionOriginWhere(origin);
   const statementViewer = options.statementViewer?.workspaceId === workspaceId ? options.statementViewer : null;
   const todayDate = dateKeyToUTC(today);
   const tomorrow = dateKeyToUTC(addDays(today, 1));
@@ -99,19 +102,19 @@ export async function financeOverview(workspaceId: string, today: string, option
     prisma.$queryRaw<DailyRow[]>(Prisma.sql`
       SELECT "date" AS day, "type"::text AS type, SUM("amountCents")::bigint AS total
       FROM "FinanceTransaction"
-      WHERE "workspaceId"=${workspaceId} AND "isConsumption"=true AND "source"<>'QUICK_INCOME' AND "date">=${previousStart} AND "date"<${tomorrow}
+      WHERE "workspaceId"=${workspaceId} AND "isConsumption"=true AND "source"<>'QUICK_INCOME' AND "date">=${previousStart} AND "date"<${tomorrow} AND ${transactionOriginSql(origin)}
       GROUP BY 1,2 ORDER BY 1 ASC
     `),
     prisma.financeTransaction.groupBy({
       by: ["categoryId"],
-      where: { workspaceId, type: "EXPENSE", isConsumption: true, date: currentRange },
+      where: { workspaceId, type: "EXPENSE", isConsumption: true, date: currentRange, AND: originWhere },
       _sum: { amountCents: true },
       orderBy: { _sum: { amountCents: "desc" } },
       take: 6,
     }),
     prisma.financeTransaction.groupBy({
       by: ["categoryId"],
-      where: { workspaceId, type: "EXPENSE", isConsumption: true, date: { gte: previousStart, lt: monthStart } },
+      where: { workspaceId, type: "EXPENSE", isConsumption: true, date: { gte: previousStart, lt: monthStart }, AND: originWhere },
       _sum: { amountCents: true },
     }),
     prisma.financeCategory.findMany({
@@ -119,7 +122,7 @@ export async function financeOverview(workspaceId: string, today: string, option
       select: { id: true, name: true },
     }),
     prisma.financeTransaction.findMany({
-      where: { workspaceId, type: "EXPENSE", isConsumption: true, date: currentRange },
+      where: { workspaceId, type: "EXPENSE", isConsumption: true, date: currentRange, AND: originWhere },
       select: { amountCents: true, description: true, merchant: true, recurring: true, subscriptionId: true, fixedExpenseId: true, accountId: true, date: true, cardStatementId: true },
     }),
     prisma.subscription.findMany({
@@ -141,7 +144,7 @@ export async function financeOverview(workspaceId: string, today: string, option
       orderBy: [{ date: "desc" }, { updatedAt: "desc" }],
     }),
     prisma.financeTransaction.findMany({
-      where: { workspaceId, source: { not: "QUICK_INCOME" }, type: { not: "TRANSFER" } },
+      where: { workspaceId, source: { not: "QUICK_INCOME" }, type: { not: "TRANSFER" }, AND: originWhere },
       select: { id: true, type: true, description: true, merchant: true, amountCents: true, date: true, source: true, account: { select: { name: true } }, category: { select: { name: true } } },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       take: 8,
@@ -150,7 +153,7 @@ export async function financeOverview(workspaceId: string, today: string, option
       SELECT b."id", c."name" AS category, b."limitCents", COALESCE(SUM(t."amountCents"),0)::bigint AS "spentCents"
       FROM "Budget" b
       JOIN "FinanceCategory" c ON c."id"=b."categoryId"
-      LEFT JOIN "FinanceTransaction" t ON t."workspaceId"=b."workspaceId" AND t."isConsumption"=true AND t."categoryId"=b."categoryId" AND t."type"='EXPENSE' AND t."date">=b."startDate" AND t."date"<=b."endDate"
+      LEFT JOIN "FinanceTransaction" t ON t."workspaceId"=b."workspaceId" AND t."isConsumption"=true AND t."categoryId"=b."categoryId" AND t."type"='EXPENSE' AND t."date">=b."startDate" AND t."date"<=b."endDate" AND ${transactionOriginSql(origin, "t")}
       WHERE b."workspaceId"=${workspaceId} AND b."startDate"<=${todayDate} AND b."endDate">=${todayDate}
       GROUP BY b."id", c."name", b."limitCents"
       ORDER BY b."limitCents" DESC
@@ -165,13 +168,13 @@ export async function financeOverview(workspaceId: string, today: string, option
       orderBy: { maturityDate: "asc" },
       take: 5,
     }),
-    statementViewer ? cardStatementRows(statementViewer) : Promise.resolve<StatementRow[]>([]),
+    statementViewer ? cardStatementRows(statementViewer, origin) : Promise.resolve<StatementRow[]>([]),
     prisma.financePlan.findUnique({ where: { workspaceId }, include: { receivingAccount: { select: { name: true, type: true, isArchived: true } } } }),
     prisma.fixedExpense.findMany({ where: { workspaceId, isActive: true }, orderBy: [{ dueDay: "asc" }, { name: "asc" }] }),
     personalAssetRows(workspaceId),
   ]);
   const statements = summarizeCardStatements(statementRows, today);
-  const positions = await creditCardPositions(workspaceId, today, statementRows, { accounts: accounts.filter(row => row.type === "CREDIT_CARD"), originThroughToday: originMovements, incomingThroughToday: incomingTransfers });
+  const positions = await creditCardPositions(workspaceId, today, statementRows, { accounts: accounts.filter(row => row.type === "CREDIT_CARD"), originThroughToday: originMovements, incomingThroughToday: incomingTransfers, origin });
 
   const categoryById = new Map(categoryNames.map((category) => [category.id, category.name]));
   const previousCategoryAmounts = new Map(previousCategories.map((category) => [category.categoryId, category._sum.amountCents || 0]));
@@ -272,7 +275,7 @@ export async function financeOverview(workspaceId: string, today: string, option
   if (statementViewer?.role === "OWNER") salaryPlan = await addSalaryPlanning(workspaceId, today, salaryPlan, {
     accounts, fixed: plannedAll, subscriptions: subscriptions.map(row => ({ ...row, nextChargeDate: dayText(row.nextChargeDate)!, fixedExpenseId: row.fixedExpenseId ?? null, accountId: row.accountId ?? null })), statements: statementRows,
     goals: savingsGoals.map(row => ({ ...row, targetDate: dayText(row.targetDate), monthlyContributionCents: row.monthlyContributionCents ?? null, paidAmountCents: (row.contributions ?? []).reduce((sum, item) => sum + item.amountCents, 0) })), incomeCents: incomeReferenceCents || null,
-  });
+  }, origin);
   // Same limit rule as the accounts and statements screens: one breakdown per card.
   const creditCards = positions.map((card) => {
     const due = nextDueDate(today, card.dueDay);

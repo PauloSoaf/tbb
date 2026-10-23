@@ -239,19 +239,12 @@ describe.skipIf(!process.env.FINANCE_PLANNING_TEST_DB_URL)("credit sync against 
     expect(await prisma.financialSnapshot.count({ where: { workspaceId: actor.workspaceId } })).toBe(0);
   });
 
-  it("reconciles the current account balance explicitly and counts recorded payments once", async () => {
-    await prisma.cardStatementPayment.create({ data: { workspaceId: actor.workspaceId, accountId: cardId, cardStatementId: statementId, amountCents: 2000, date: new Date("2032-10-15"), fingerprint: randomUUID(), sourceId: "manual", locator: "manual-payment" } });
-    bills = []; accountBalance = 80;
-    expect(await sync()).toMatchObject({ status: "SUCCESS", needsReview: 1 });
-    const [review] = await reviews();
-    expect(review.data.bill).toMatchObject({ basis: "ACCOUNT_BALANCE", balanceCents: 8000, totalCents: 10000 });
-    await approveCreditBill(prisma, actor, { snapshotId: review.id, statementId, statementVersion: (await statement()).updatedAt.toISOString(), status: "OPEN", confirmed: true });
-    expect((await statement()).amountCents).toBe(10000);
-    accountBalance = 90;
+  it("does not replace an invoice with the used credit limit", async () => {
+    bills = []; accountBalance = 8000;
+    const before = await statement();
     expect(await sync()).toMatchObject({ status: "SUCCESS", needsReview: 0 });
-    expect((await statement()).amountCents).toBe(11000);
-    expect(await prisma.cardStatementPayment.aggregate({ where: { workspaceId: actor.workspaceId }, _sum: { amountCents: true } })).toMatchObject({ _sum: { amountCents: 2000 } });
-    expect((await statement()).amountCents - 2000).toBe(9000);
+    expect(await reviews()).toHaveLength(0);
+    expect((await statement()).amountCents).toBe(before.amountCents);
   });
 
   it("does not propose the current balance for a different local cycle when the bank publishes its actual current bill", async () => {
@@ -262,20 +255,20 @@ describe.skipIf(!process.env.FINANCE_PLANNING_TEST_DB_URL)("credit sync against 
     expect((await latestCreditBills(prisma, actor.workspaceId, cardId)).some(row => row.data.bill.basis === "ACCOUNT_BALANCE")).toBe(false);
   });
 
-  it("keeps a current balance with unknown payment dates in review", async () => {
+  it("preserves undated payments without manufacturing a bill from used limit", async () => {
     await prisma.cardStatementPayment.create({ data: { workspaceId: actor.workspaceId, accountId: cardId, cardStatementId: statementId, amountCents: 2000, date: null, origin: "MANUAL_VERIFIED", fingerprint: randomUUID(), sourceId: "manual", locator: "unknown-payment" } });
     bills = []; accountBalance = 80;
-    expect(await sync()).toMatchObject({ status: "SUCCESS", needsReview: 1 });
-    const [review] = await reviews();
-    await expect(approveCreditBill(prisma, actor, { snapshotId: review.id, statementId, statementVersion: (await statement()).updatedAt.toISOString(), status: "OPEN", confirmed: true })).rejects.toThrow("datas dos pagamentos");
+    expect(await sync()).toMatchObject({ status: "SUCCESS", needsReview: 0 });
+    expect(await reviews()).toHaveLength(0);
     expect((await statement()).amountCents).toBe(10000);
+    expect(await prisma.cardStatementPayment.count({where:{workspaceId:actor.workspaceId}})).toBe(1);
   });
 
-  it("rejects a current-balance approval if payments changed after the preview", async () => {
+  it("leaves the imported invoice unchanged when used limit changes", async () => {
     bills = []; accountBalance = 80; await sync();
-    const [review] = await reviews(), version = (await statement()).updatedAt.toISOString();
-    await prisma.cardStatementPayment.create({ data: { workspaceId: actor.workspaceId, accountId: cardId, cardStatementId: statementId, amountCents: 2000, date: new Date("2032-10-15"), fingerprint: randomUUID(), sourceId: "manual", locator: "late-recorded-payment" } });
-    await expect(approveCreditBill(prisma, actor, { snapshotId: review.id, statementId, statementVersion: version, status: "OPEN", confirmed: true })).rejects.toThrow("pagamentos mudaram");
+    accountBalance = 9000; await sync();
+    expect((await statement()).amountCents).toBe(10000);
+    expect(await reviews()).toHaveLength(0);
   });
 
   it("keeps existing overdue bills visible even when the purchase window starts later", async () => {

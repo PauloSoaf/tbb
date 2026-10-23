@@ -1,3 +1,4 @@
+vi.mock("../data-origin-request",()=>({currentFinanceOrigin:async()=>"combined"}));
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,7 +24,7 @@ describe("transaction paging and effective permissions",()=>{
  });
  it("retains the transfer filter for both counting and display",async()=>{
   mocks.rows.mockResolvedValue([row("transfer","TRANSFER")]);const html=renderToStaticMarkup(await Page({searchParams:Promise.resolve({type:"TRANSFER"})}));
-  expect(mocks.count.mock.calls[0][0].where).toEqual(transactionWhere("w1",{type:"TRANSFER"}));expect(mocks.rows.mock.calls[0][0].where.type).toBe("TRANSFER");expect(html).toContain('data-transaction-id="transfer"');
+  expect(mocks.count.mock.calls[0][0].where).toMatchObject(transactionWhere("w1",{type:"TRANSFER"}));expect(mocks.rows.mock.calls[0][0].where.type).toBe("TRANSFER");expect(html).toContain('data-transaction-id="transfer"');
  });
  it("denies READ before any financial query",async()=>{
   mocks.permission.mockRejectedValue(new AuthorizationError());await expect(Page({searchParams:Promise.resolve({})})).rejects.toThrow();expect(mocks.rows).not.toHaveBeenCalled();expect(mocks.count).not.toHaveBeenCalled();expect(mocks.accounts).not.toHaveBeenCalled();

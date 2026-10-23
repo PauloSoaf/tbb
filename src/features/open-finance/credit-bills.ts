@@ -18,7 +18,7 @@ export async function latestCreditBills(db: DB, workspaceId: string, accountId?:
   const latest = new Map<string, (typeof rows)[number] & { data: BillPayload }>();
   for (const row of rows) {
     const data = row.payload as unknown as BillPayload;
-    if (!data?.bill?.externalId || !data.linkId) continue;
+    if (!data?.bill?.externalId || !data.linkId || data.bill.basis === "ACCOUNT_BALANCE") continue;
     const key = `${data.linkId}:${data.bill.externalId}`;
     if (!latest.has(key)) latest.set(key, { ...row, data });
   }
@@ -43,6 +43,7 @@ async function storeSnapshot(db: DB, actor: ImportActor, accountId: string, sour
 
 async function writeBill(db: DB, actor: ImportActor, accountId: string, bill: CreditBill, existing: CardStatement | null, asOfDate: string) {
   if (!bill.status) throw new Error("Confirme a situação da fatura.");
+  if (bill.basis === "ACCOUNT_BALANCE") throw new Error("Limite utilizado não confirma o valor de uma fatura. Importe a fatura publicada pelo banco.");
   if (existing?.rolledIntoStatementId || existing?.reconciliation === "PENDING") throw new Error("Revise primeiro o saldo transportado ou a sobreposição desta fatura.");
   if (existing?.status === "PAID" && (bill.status !== "PAID" || existing.amountCents !== bill.totalCents)) throw new Error("Fatura quitada preservada; revise o histórico antes de alterar.");
   if (existing && date(existing.sourceAsOf)! > asOfDate) throw new Error("A fonte do banco é anterior à conciliação existente.");

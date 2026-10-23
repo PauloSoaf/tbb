@@ -1,4 +1,5 @@
 import { financePageAccess } from "@/features/finance/finance-page-access";
+import { currentFinanceOrigin } from "@/features/finance/data-origin-request";
 import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
 import Link from "next/link";
 import { Plus } from "lucide-react";
@@ -25,13 +26,14 @@ import { CASH_TYPES } from "@/features/finance/balance-sync";
 
 export default async function AccountsPage() {
   const c = await financePageAccess();
+  const origin = await currentFinanceOrigin();
   const today = dayKey(new Date(), c.workspace.timezone);
   const [s, categories, statementRows] = await Promise.all([
     financeSummary(c.workspaceId, today),
     prisma.financeCategory.findMany({ where: { workspaceId: c.workspaceId, isArchived: false }, orderBy: [{ type: "asc" }, { name: "asc" }] }),
-    cardStatementRows(c),
+    cardStatementRows(c, origin),
   ]);
-  const cards = new Map((await creditCardPositions(c.workspaceId, today, statementRows)).map((card) => [card.id, card]));
+  const cards = new Map((await creditCardPositions(c.workspaceId, today, statementRows, { origin })).map((card) => [card.id, card]));
   const cashAccounts = s.accounts.filter((a) => !isUnassignedAccount(a) && CASH_TYPES.includes(a.type)).map(({ id, name, type, institution, balanceCents }) => ({ id, name, type, institution, balanceCents }));
   const day = (value: string) => formatDay(value, c.workspace.locale, { day: "2-digit", month: "2-digit", year: "numeric" });
 

@@ -20,7 +20,7 @@ describe("F04 · two different dates, never mixed up", () => {
     const text = JSON.stringify(view(base)).toLowerCase();
     expect(text).not.toContain("sincroniz");
     expect(text).not.toContain("atualizada pelo banco");
-    expect(view(base).note).toContain("não consulta o banco");
+    expect(view(base).note).toContain("documento e a última conferência");
   });
 
   it("uses the workspace's time zone and shows its offset", () => {

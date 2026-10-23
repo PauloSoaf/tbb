@@ -10,6 +10,7 @@ import { revealItemId } from "./secret";
 import { prepareCreditSync } from "./credit-sync";
 import { dayOf } from "./normalize";
 import { historyCutoff } from "./history";
+import { sameFinancialOccurrence } from "@/features/finance/source-identity";
 
 const LEASE_MS = 10 * 60 * 1000;
 /** Pluggy can revise a movement shortly after it appears, so each sync looks a little behind the last one. Known movements cost nothing. */
@@ -151,7 +152,7 @@ async function withoutKnown(prisma: PrismaClient, workspaceId: string, accountId
   const prints = new Map(candidates.map(candidate => [evidenceFingerprint(workspaceId, accountId, "", candidate), candidate]));
   const [ledger, staged] = await Promise.all([
     prisma.financeTransaction.findMany({ where: { workspaceId, accountId, fingerprint: { in: [...prints.keys()] } }, select: { fingerprint: true, amountCents: true, type: true } }),
-    prisma.financialEvidence.findMany({ where: { workspaceId, source: { accountId }, locator: { in: candidates.map(candidate => candidate.locator) } }, select: { locator: true, candidate: true, decision: true, version: true, reviewedByUserId: true } }),
+    prisma.financialEvidence.findMany({ where: { workspaceId, source: { accountId }, locator: { in: candidates.map(candidate => candidate.locator) } }, select: { locator: true, candidate: true, decision: true, version: true, reviewedByUserId: true, transaction: { select: { amountCents: true, type: true } } } }),
   ]);
   const known = new Set(ledger.flatMap(row => row.fingerprint ? [row.fingerprint] : []));
   const seen = new Set(staged.map(row => row.locator));
@@ -160,6 +161,7 @@ async function withoutKnown(prisma: PrismaClient, workspaceId: string, accountId
     const existing = ledger.find(row => row.fingerprint === print);
     if (existing && existing.amountCents === candidate.amountCents && existing.type === (candidate.eventKind === "REFUND" ? "REFUND" : "EXPENSE")) return false;
     const evidence = staged.filter(row => row.locator === candidate.locator);
+    if (evidence.some(row => row.decision === "COMMITTED" && row.transaction?.amountCents === candidate.amountCents && row.transaction.type === (candidate.eventKind === "REFUND" ? "REFUND" : "EXPENSE"))) return false;
     if (evidence.some(row => row.decision === "IGNORE" && row.reviewedByUserId || row.decision === "NEEDS_REVIEW" && (row.version > 1 || row.reviewedByUserId))) return false;
     if (evidence.some(row => JSON.stringify(candidateSchema.parse(row.candidate)) === JSON.stringify(candidate))) return false;
     return true;
@@ -189,6 +191,15 @@ async function stageAndApplyOnce(prisma: PrismaClient, actor: ImportActor, accou
   return runFinancialImport(prisma, async db => {
     const ids = await stageFinancialDocuments(db, actor, accountId, [document(name, label, candidates, preserveBefore)]);
     const preview = await previewFinancialEvidence(db, actor, ids);
+    const possible = preview.rows.filter(row => row.action === "AMBIGUOUS" && row.matches.length === 1 && row.candidate.confidence === "CONFIRMED" && !row.candidate.problems.length);
+    const targets = possible.length ? await db.financeTransaction.findMany({ where: { workspaceId: actor.workspaceId, accountId, id: { in: possible.flatMap(row => row.matches.map(match => match.id)) }, NOT: [{ tags: { has: "open-finance" } }, { evidence: { some: { decision: "COMMITTED", source: { fileName: { startsWith: "Open Finance ·" } } } } }] } }) : [];
+    const claimed = new Set<string>();
+    const linkable = possible.flatMap(row => {
+      const target = targets.find(value => value.id === row.matches[0].id);
+      const candidate = row.candidate;
+      if (!target || claimed.has(target.id) || !candidate.effectiveDate || !candidate.amountCents || !sameFinancialOccurrence(target, { accountId, type: candidate.eventKind === "REFUND" ? "REFUND" : candidate.eventKind === "INCOME" ? "INCOME" : "EXPENSE", amountCents: candidate.amountCents, date: candidate.effectiveDate, description: candidate.description, merchant: candidate.merchant, cardStatementId: candidate.statementId, installmentNumber: candidate.installmentNumber, installmentTotal: candidate.installmentTotal })) return [];
+      claimed.add(target.id); return [{ id: row.id, action: "LINK_EVIDENCE" as const, targetId: target.id }];
+    });
     const eligible = preview.rows.filter(row => row.action === "CREATE" && row.candidate.confidence === "CONFIRMED" && !row.candidate.problems.length && AUTO_CREATE_KINDS.has(row.candidate.eventKind));
     const statements = await db.cardStatement.findMany({ where: { workspaceId: actor.workspaceId, id: { in: [...new Set(eligible.flatMap(row => row.candidate.statementId ? [row.candidate.statementId] : []))] } }, select: { id: true, amountCents: true, transactions: { select: { type: true, amountCents: true, statementDetailMode: true } } } });
     const sign = (row: { type: string; amountCents: number }) => (row.type === "REFUND" ? -1 : 1) * row.amountCents;
@@ -203,7 +214,7 @@ async function stageAndApplyOnce(prisma: PrismaClient, actor: ImportActor, accou
       remaining.set(row.candidate.statementId, available - cost); return true;
     });
     let autoCreated = 0;
-    if (creatable.length) autoCreated = (await confirmFinancialEvidence(db, actor, ids, preview.token, creatable.map(row => ({ id: row.id, action: "CREATE" as const })))).created;
+    if (creatable.length || linkable.length) autoCreated = (await confirmFinancialEvidence(db, actor, ids, preview.token, [...linkable, ...creatable.map(row => ({ id: row.id, action: "CREATE" as const }))])).created;
     const heldIds = eligible.filter(row => !creatable.some(value => value.id === row.id)).map(row => row.id);
     if (heldIds.length) await db.financialEvidence.updateMany({ where: { workspaceId: actor.workspaceId, id: { in: heldIds } }, data: { reason: "O detalhamento ultrapassa o valor conciliado da fatura. Confira duplicatas, estornos e competência antes de confirmar." } });
     if (credit) await db.financialEvidence.updateMany({ where: { workspaceId: actor.workspaceId, source: { accountId }, sourceId: { notIn: ids }, locator: { in: candidates.map(row => row.locator) }, decision: "NEEDS_REVIEW", version: 1, reviewedByUserId: null }, data: { decision: "IGNORE", reason: "Substituída por atualização do banco; a evidência original foi preservada.", version: { increment: 1 } } });
@@ -214,7 +225,7 @@ async function stageAndApplyOnce(prisma: PrismaClient, actor: ImportActor, accou
     for (const { importBatchId } of batches) {
       if (importBatchId && !await db.financialEvidence.count({ where: { workspaceId: actor.workspaceId, importBatchId, decision: "NEEDS_REVIEW" } })) await db.importBatch.update({ where: { id: importBatchId }, data: { status: "COMPLETED", completedAt: new Date() } });
     }
-    return { staged: preview.rows.length, autoCreated, kept: keptIds.length, needsReview: preview.rows.length - creatable.length - keptIds.length };
+    return { staged: preview.rows.length, autoCreated, kept: keptIds.length + linkable.length, needsReview: preview.rows.length - creatable.length - keptIds.length - linkable.length };
   });
 }
 

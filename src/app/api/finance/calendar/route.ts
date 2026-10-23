@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { currentFinanceOrigin } from "@/features/finance/data-origin-request";
 import { financeCalendarMonth } from "@/features/finance/calendar-query";
 import { isMonthKey } from "@/features/finance/calendar-core";
 import { requirePermission, getCurrentTenantContext, AuthorizationError } from "@/lib/workspace";
@@ -15,6 +16,6 @@ export async function GET(request: Request) {
   if (!isMonthKey(month) || month === "9998-12") {
     return NextResponse.json({ error: "Informe um mês válido no formato AAAA-MM." }, { status: 400 });
   }
-  const calendar = await financeCalendarMonth(context.workspaceId, month, context.role === "OWNER");
+  const calendar = await financeCalendarMonth(context.workspaceId, month, context.role === "OWNER", await currentFinanceOrigin());
   return NextResponse.json(calendar, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
 }

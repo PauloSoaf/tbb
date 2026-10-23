@@ -5,8 +5,8 @@ import { isDateKey } from "@/lib/dates";
  * - modifiedAt: when the record last changed inside TBB (an edit, an import);
  * - bankAsOfDate: the date the bank's own information refers to (the document or file date);
  * - lastVerifiedAt: when the user last confirmed the values against the original document.
- * TBB does not talk to the banks, so nothing here ever says "synchronized". */
-export type StatementSourceKind = "JSON_IMPORT" | "VERIFIED_DOCUMENT" | "UNKNOWN";
+ * Imported documents and confirmed Open Finance bills retain their distinct provenance. */
+export type StatementSourceKind = "JSON_IMPORT" | "VERIFIED_DOCUMENT" | "OPEN_FINANCE" | "UNKNOWN";
 export type StatementProvenance = {
   createdAt: string | null;
   modifiedAt: string | null;
@@ -23,11 +23,13 @@ const SKEW_MS = 5 * 60_000;
 const NOT_INFORMED = "Não informado";
 
 export function sourceKindOf(source: string | null | undefined): StatementSourceKind {
+  if (source === "OPEN_FINANCE") return "OPEN_FINANCE";
   if (source === "MANUAL_IMPORT") return "JSON_IMPORT";
   if (source === "VERIFIED_DOCUMENT") return "VERIFIED_DOCUMENT";
   return "UNKNOWN";
 }
 const SOURCE_LABEL: Record<StatementSourceKind, string> = {
+  OPEN_FINANCE: "Open Finance · fatura publicada pelo banco",
   JSON_IMPORT: "Arquivo de faturas (JSON) importado",
   VERIFIED_DOCUMENT: "Documento do banco conferido por você",
   UNKNOWN: "Origem não registrada",
@@ -76,6 +78,6 @@ export function describeProvenance(provenance: StatementProvenance | undefined, 
   return {
     summary: `Alterada no TBB em ${modified}. Informação bancária até ${bankText}.${stale ? " Dados sem confirmação recente." : ""}`,
     stale, staleReason, lines,
-    note: "O TBB não consulta o banco sozinho: estas datas dizem de onde vêm os números registrados. Para atualizar, use Corrigir fatura ou importe o documento do banco.",
+    note: provenance?.sourceKind === "OPEN_FINANCE" ? "Valor da fatura publicada pelo banco e recebido pelo Open Finance. Limite utilizado e parcelas futuras não são tratados como total desta fatura." : "Estas datas identificam o documento e a última conferência. Para atualizar, use Corrigir fatura, importe o original ou concilie com o Open Finance.",
   };
 }

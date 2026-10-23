@@ -1,5 +1,6 @@
 import { financePageAccess } from "@/features/finance/finance-page-access";
 import { FinancePrivacyBoundary } from "@/features/finance/FinancePrivacy";
+import { currentFinanceOrigin } from "@/features/finance/data-origin-request";
 import { FinanceOverview } from "@/features/finance/FinanceOverview";
 import { PartnerFinanceSummary, type FinanceScopeMetrics } from "@/features/finance/PartnerFinanceSummary";
 import { financeOverview } from "@/features/finance/overview-query";
@@ -15,6 +16,7 @@ function toScopeMetrics(overview: Awaited<ReturnType<typeof financeOverview>>): 
 
 export default async function FinancePage({ searchParams }: { searchParams: Promise<{ scope?: string }> }) {
   const context = await financePageAccess();
+  const origin = await currentFinanceOrigin();
   const { scope: rawScope } = await searchParams;
   const scope = rawScope === "partner" || rawScope === "together" ? rawScope : "me";
   const today = dayKey(new Date(), context.workspace.timezone);
@@ -28,7 +30,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
       </div></FinancePrivacyBoundary>;
     }
     const [partnerOverview, partnerWorkspace] = await Promise.all([
-      financeOverview(partnerAccess.partnerWorkspaceId, today),
+      financeOverview(partnerAccess.partnerWorkspaceId, today, { origin }),
       prisma.workspace.findUnique({ where: { id: partnerAccess.partnerWorkspaceId }, select: { name: true } }),
     ]);
     const partnerMetrics = toScopeMetrics(partnerOverview);
@@ -39,7 +41,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
         <PartnerFinanceSummary scope="partner" me={partnerMetrics} partner={partnerMetrics} partnerName={partnerName}/>
       </div></FinancePrivacyBoundary>;
     }
-    const meOverview = await financeOverview(context.workspaceId, today);
+    const meOverview = await financeOverview(context.workspaceId, today, { origin });
     return <FinancePrivacyBoundary canWrite={context.canWrite}><div className="stack">
       <PageHeader eyebrow="FINANCE" title="Juntos" description="Renda, despesas e saldo somados. Cada workspace continua com seus próprios registros."/>
       <PartnerFinanceSummary scope="together" me={toScopeMetrics(meOverview)} partner={partnerMetrics} partnerName={partnerName}/>
@@ -48,11 +50,11 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
 
   await requirePermission("READ");
   const [overview, calendar, calendarOptions, canWrite] = await Promise.all([
-    financeOverview(context.workspaceId, today, { statementViewer: context }),
-    financeCalendarMonth(context.workspaceId, today.slice(0, 7), context.role === "OWNER"),
+    financeOverview(context.workspaceId, today, { statementViewer: context, origin }),
+    financeCalendarMonth(context.workspaceId, today.slice(0, 7), context.role === "OWNER", origin),
     financeCalendarOptions(context.workspaceId),
     financeCalendarCanWrite(),
   ]);
   const captureAccounts = overview.accounts.filter((account) => !account.unassigned).map(({ id, name, institution, type }) => ({ id, name, institution, type }));
-  return <FinancePrivacyBoundary canWrite={context.canWrite}><FinanceOverview key={context.workspaceId} data={overview} captureAccounts={captureAccounts} calendar={calendar} calendarCategories={calendarOptions.categories} calendarCanWrite={canWrite}/></FinancePrivacyBoundary>;
+  return <FinancePrivacyBoundary canWrite={context.canWrite}><FinanceOverview key={`${context.workspaceId}:${origin}`} data={overview} captureAccounts={captureAccounts} calendar={calendar} calendarCategories={calendarOptions.categories} calendarCanWrite={canWrite}/></FinancePrivacyBoundary>;
 }

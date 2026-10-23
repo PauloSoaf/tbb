@@ -1,0 +1,5 @@
+.finance-origin-filter{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;margin-bottom:18px;border:1px solid var(--border);border-radius:12px;background:var(--card)}
+.finance-origin-filter label{display:flex;flex-direction:row;align-items:center;gap:9px;font-size:.8rem;font-weight:650;white-space:nowrap}
+.finance-origin-filter select{max-width:100%;border:1px solid var(--border);border-radius:8px;padding:6px 10px;background:var(--background);color:var(--foreground)}
+.finance-origin-filter p{margin:0;max-width:640px;font-size:.72rem;line-height:1.5;color:var(--muted-foreground)}
+@media(max-width:760px){.finance-origin-filter{align-items:flex-start;flex-direction:column}.finance-origin-filter label{width:100%}.finance-origin-filter select{flex:1;min-width:0}}
