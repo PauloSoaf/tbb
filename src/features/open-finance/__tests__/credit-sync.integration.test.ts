@@ -48,9 +48,10 @@ describe.skipIf(!process.env.FINANCE_PLANNING_TEST_DB_URL)("credit sync against 
   }, 30000);
   afterAll(async () => { await prisma.$disconnect(); });
 
-  it("requires a real credit account, a start date, and owner authorization", async () => {
+  it("requires a real credit account and owner authorization, and accepts all available history", async () => {
     await expect(mapAccountLink(prisma, actor, linkId, { accountId: checkingId, syncFromDate: "2032-10-01", enabled: true })).rejects.toThrow("cartões");
-    await expect(mapAccountLink(prisma, actor, linkId, { accountId: cardId, syncFromDate: null, enabled: true })).rejects.toThrow("data inicial");
+    await mapAccountLink(prisma, actor, linkId, { accountId: cardId, syncFromDate: null, enabled: true });
+    expect((await prisma.openFinanceAccountLink.findUniqueOrThrow({ where: { id: linkId } })).syncFromDate).toBeNull();
     await expect(syncConnection({ prisma, client }, { ...actor, role: "MEMBER" }, connectionId, "MANUAL")).rejects.toThrow("titular");
   });
 
@@ -71,6 +72,15 @@ describe.skipIf(!process.env.FINANCE_PLANNING_TEST_DB_URL)("credit sync against 
     expect(await sync()).toMatchObject({ status: "SUCCESS", autoCreated: 1 });
     expect(await statement()).toMatchObject({ id: statementId, amountCents: 12000, source: "OPEN_FINANCE" });
     expect((await ledger()).reduce((sum, row) => sum + row.amountCents, 0)).toBe(3000);
+  });
+
+  it("keeps excess detail for review without aborting other purchases in the same batch", async () => {
+    transactions = [purchase({ amount: 80 }), purchase({ id: "excess", amount: 50 })];
+    expect(await sync()).toMatchObject({ status: "SUCCESS", autoCreated: 1, needsReview: 1 });
+    expect(await ledger()).toHaveLength(1);
+    expect((await ledger()).reduce((sum, row) => sum + row.amountCents, 0)).toBeLessThanOrEqual(10000);
+    expect(await prisma.financialEvidence.count({ where: { workspaceId: actor.workspaceId, decision: "NEEDS_REVIEW" } })).toBe(1);
+    expect(await sync()).toMatchObject({ status: "SUCCESS", autoCreated: 0, staged: 0 });
   });
 
   it("advances a known future bill to open even when its amount is unchanged", async () => {
@@ -242,6 +252,14 @@ describe.skipIf(!process.env.FINANCE_PLANNING_TEST_DB_URL)("credit sync against 
     expect((await statement()).amountCents).toBe(11000);
     expect(await prisma.cardStatementPayment.aggregate({ where: { workspaceId: actor.workspaceId }, _sum: { amountCents: true } })).toMatchObject({ _sum: { amountCents: 2000 } });
     expect((await statement()).amountCents - 2000).toBe(9000);
+  });
+
+  it("does not propose the current balance for a different local cycle when the bank publishes its actual current bill", async () => {
+    await prisma.cardStatement.update({ where: { id: statementId }, data: { dueDate: new Date("2032-12-03"), closingDate: new Date("2032-11-26"), periodKey: "due:2032-12-03", referenceMonth: "2032-12" } });
+    accountBalance = 80;
+    expect(await sync()).toMatchObject({ status: "SUCCESS" });
+    expect((await statement()).amountCents).toBe(10000);
+    expect((await latestCreditBills(prisma, actor.workspaceId, cardId)).some(row => row.data.bill.basis === "ACCOUNT_BALANCE")).toBe(false);
   });
 
   it("keeps a current balance with unknown payment dates in review", async () => {

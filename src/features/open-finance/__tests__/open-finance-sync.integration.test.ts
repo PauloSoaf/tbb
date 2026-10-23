@@ -84,7 +84,7 @@ describe.skipIf(!process.env.FINANCE_PLANNING_TEST_DB_URL)("Open Finance sync in
       const links = await prisma.openFinanceAccountLink.findMany({ where: { connectionId }, orderBy: { kind: "asc" } });
       expect(links.map((link) => [link.kind, link.isEnabled, link.accountId, link.maskedNumber])).toEqual([["BANK", false, null, "2345"], ["CREDIT", false, null, "5555"]]);
       expect(links[0].providerBalanceCents).toBe(10050);
-      expect(links[0].syncFromDate?.toISOString().slice(0, 10)).toBe(TODAY);
+      expect(links[0].syncFromDate).toBeNull();
       expect(state.calls).toHaveLength(0);
       const connection = await prisma.openFinanceConnection.findUniqueOrThrow({ where: { id: connectionId } });
       expect([connection.status, connection.providerStatus, connection.institutionName, connection.lastErrorCode, connection.syncLeaseUntil]).toEqual(["ACTIVE", "UPDATED", "Synthetic Bank", null, null]);

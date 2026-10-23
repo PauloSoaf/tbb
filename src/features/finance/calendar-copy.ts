@@ -1,6 +1,7 @@
 import type { Locale } from "@/lib/i18n/messages";
 
 const pt = {
+  refresh: "Atualizar calendário", moreEntries: "outros", autoRefresh: "Atualizado automaticamente a cada 30 segundos enquanto esta tela estiver aberta.", pendingImports: "movimento(s) da Pluggy aguardam conciliação e ainda não entram nos totais.", reviewImports: "Revisar importações",
   postedDate: "Postagem no banco",
   title: "Calendário financeiro", compactTitle: "Calendário dos gastos", daily: "FLUXO DIÁRIO", hint: "Data da compra quando confirmada; postagem no banco preservada.",
   full: "Tela completa", previous: "Mês anterior", next: "Próximo mês", chooseMonth: "Escolher mês", today: "Hoje", expenses: "Saídas", income: "Entradas", result: "Resultado registrado", scheduled: "Agendado", noSpending: "sem gastos", loading: "Carregando lançamentos do mês…", loadError: "Não foi possível carregar o mês.", retry: "Tentar novamente", swipe: "Deslize para navegar pelos meses ou escolha um mês no título.",
@@ -11,6 +12,7 @@ const pt = {
 };
 export type CalendarCopyKey = keyof typeof pt;
 const en: Record<CalendarCopyKey, string> = {
+  refresh: "Refresh calendar", moreEntries: "more", autoRefresh: "Automatically refreshed every 30 seconds while this screen is visible.", pendingImports: "Pluggy transaction(s) await reconciliation and are not included in totals yet.", reviewImports: "Review imports",
   postedDate: "Bank posting date",
   title: "Spending calendar", compactTitle: "Spending calendar", daily: "DAILY FLOW", hint: "Confirmed purchase dates; bank posting dates preserved.",
   full: "Full view", previous: "Previous month", next: "Next month", chooseMonth: "Choose month", today: "Today", expenses: "Outflows", income: "Inflows", result: "Recorded result", scheduled: "Scheduled", noSpending: "no spending", loading: "Loading this month's transactions…", loadError: "Could not load the month.", retry: "Try again", swipe: "Swipe between months or choose a month in the heading.",
@@ -20,6 +22,7 @@ const en: Record<CalendarCopyKey, string> = {
   pageTitle: "Your money, day by day.", pageHint: "Explore months, view purchases and income, and record new transactions.", eyebrow: "MONEY · CALENDAR",
 };
 const es: Record<CalendarCopyKey, string> = {
+  refresh: "Actualizar calendario", moreEntries: "más", autoRefresh: "Se actualiza automáticamente cada 30 segundos mientras esta pantalla esté visible.", pendingImports: "movimiento(s) de Pluggy pendientes de conciliación, todavía fuera de los totales.", reviewImports: "Revisar importaciones",
   postedDate: "Fecha de registro bancario",
   title: "Calendario financiero", compactTitle: "Calendario de gastos", daily: "FLUJO DIARIO", hint: "Gastos y entradas organizados por fecha de movimiento.",
   full: "Vista completa", previous: "Mes anterior", next: "Mes siguiente", chooseMonth: "Elegir mes", today: "Hoy", expenses: "Salidas", income: "Entradas", result: "Resultado registrado", scheduled: "Programado", noSpending: "sin gastos", loading: "Cargando movimientos del mes…", loadError: "No se pudo cargar el mes.", retry: "Intentar de nuevo", swipe: "Desliza para cambiar de mes o elige un mes en el título.",

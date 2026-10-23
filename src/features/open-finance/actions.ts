@@ -9,6 +9,7 @@ import { openFinanceError, syncMessage } from "./copy";
 import { PluggyError, sharedPluggyClient } from "./pluggy-client";
 import { syncConnection } from "./sync";
 import { approveCreditBill } from "./credit-bills";
+import { syncEverything } from "./setup";
 
 const text = (fd: FormData, key: string) => String(fd.get(key) || "").trim();
 const invalidate = () => { revalidatePath("/integrations/open-finance"); revalidatePath("/integrations"); revalidatePath("/finance", "layout"); };
@@ -21,8 +22,13 @@ const fail = (error: unknown) => {
 export async function addOpenFinanceConnection(fd: FormData) {
   try {
     const ctx = await requirePermission("WRITE");
-    await addConnection(prisma, ctx, { itemId: text(fd, "itemId"), label: text(fd, "label") });
-    invalidate(); return { success: "Conexão adicionada. Sincronize para listar as contas do banco." };
+    const id = await addConnection(prisma, ctx, { itemId: text(fd, "itemId"), label: text(fd, "label") });
+    const client = sharedPluggyClient("interactive");
+    if (client) {
+      try { const result = await syncEverything({ prisma, client }, ctx, id); invalidate(); return { success: `Conexão adicionada. ${syncMessage(result).success || "Confira as pendências da sincronização."}${result.unresolved ? ` ${result.unresolved} produto(s) precisam de vínculo nos ajustes avançados.` : ""}` }; }
+      catch { invalidate(); return { success: "Conexão adicionada. Use Sincronizar tudo para tentar buscar o histórico novamente." }; }
+    }
+    invalidate(); return { success: "Conexão adicionada. Configure as credenciais e use Sincronizar tudo." };
   } catch (error) { return fail(error); }
 }
 
@@ -31,8 +37,34 @@ export async function syncOpenFinanceNow(fd: FormData) {
     const ctx = await requirePermission("WRITE");
     const client = sharedPluggyClient("interactive");
     if (!client) throw new Error("As credenciais da Pluggy não estão configuradas no servidor (PLUGGY_CLIENT_ID e PLUGGY_CLIENT_SECRET).");
+    const summary = await syncEverything({ prisma, client }, ctx, text(fd, "connectionId"));
+    invalidate();
+    const message = syncMessage(summary);
+    return "success" in message && summary.unresolved ? { success: `${message.success} ${summary.unresolved} produto(s) precisam de vínculo nos ajustes avançados.` } : message;
+  } catch (error) { return fail(error); }
+}
+
+export async function syncOpenFinanceSelection(fd: FormData) {
+  try {
+    const ctx = await requirePermission("WRITE"), client = sharedPluggyClient("interactive");
+    if (!client) throw new Error("Credenciais da Pluggy não configuradas.");
     const summary = await syncConnection({ prisma, client }, ctx, text(fd, "connectionId"), "MANUAL");
     invalidate(); return syncMessage(summary);
+  } catch (error) { return fail(error); }
+}
+
+export async function syncAllOpenFinanceConnections() {
+  try {
+    const ctx = await requirePermission("WRITE"), client = sharedPluggyClient("interactive");
+    if (ctx.role !== "OWNER") throw new Error("Somente o titular sincroniza integrações bancárias.");
+    if (!client) throw new Error("Credenciais da Pluggy não configuradas.");
+    const connections = await prisma.openFinanceConnection.findMany({ where: { workspaceId: ctx.workspaceId, status: { in: ["ACTIVE", "ERROR"] } }, select: { id: true } });
+    let created = 0, review = 0, unresolved = 0, failed = 0;
+    for (const connection of connections) {
+      try { const result = await syncEverything({ prisma, client }, ctx, connection.id); created += result.autoCreated; review += result.needsReview; unresolved += result.unresolved; if (!["SUCCESS", "PARTIAL"].includes(result.status)) failed++; }
+      catch { failed++; }
+    }
+    invalidate(); return { success: `Histórico sincronizado: ${created} lançamento(s) novo(s), ${review} para revisar.${unresolved ? ` ${unresolved} produto(s) precisam de vínculo nos ajustes avançados.` : ""}${failed ? ` ${failed} banco(s) precisam de nova tentativa.` : ""}` };
   } catch (error) { return fail(error); }
 }
 

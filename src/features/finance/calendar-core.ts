@@ -10,6 +10,7 @@ export type FinanceCalendarEntry = {
   amountCents: number;
   type: CalendarTransactionType;
   source: string;
+  importOrigin?: "OPEN_FINANCE";
   accountName: string;
   categoryName: string | null;
   isCardPurchase: boolean;
@@ -18,7 +19,7 @@ export type FinanceCalendarEntry = {
   occurredAt?: string | null;
   occurredTimezone?: string | null;
 };
-export type FinanceCalendarMonth = { month: string; entries: FinanceCalendarEntry[] };
+export type FinanceCalendarMonth = { month: string; entries: FinanceCalendarEntry[]; pendingOpenFinanceCount?: number };
 export type FinanceCalendarOption = { id: string; name: string; type?: string };
 export type FinanceCalendarCategory = { id: string; name: string; type: string };
 export type CalendarStatement = { id: string; accountId: string; kind: string; status: string; dueDate: string | null; amountCents: number; rolledIntoStatementId?: string | null };

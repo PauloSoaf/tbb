@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { assertImportOwner, type ImportActor } from "@/features/finance/document-import";
 import { CASH_ACCOUNT_TYPES } from "@/features/finance/own-transfers";
 import { ITEM_ID_PATTERN, itemIdHash, protectItemId } from "./secret";
+import { rememberHistoryAnchor } from "./history";
 
 type DB = PrismaClient | Prisma.TransactionClient;
 /** The free Meu Pluggy plan allows five connections. */
@@ -52,14 +53,19 @@ export async function mapAccountLink(db: PrismaClient, actor: ImportActor, linkI
   if (!link) throw new Error("Conta do banco não encontrada.");
   if (input.enabled && !input.accountId) throw new Error("Escolha a conta do TBB que receberá os lançamentos.");
   if (!["BANK", "CREDIT"].includes(link.kind)) throw new Error("Tipo de conta não suportado.");
-  if (input.enabled && link.kind === "CREDIT" && !input.syncFromDate) throw new Error("Informe a data inicial das compras do cartão.");
   if (input.accountId) {
     const account = await db.account.findFirst({ where: { id: input.accountId, workspaceId: actor.workspaceId, isArchived: false, currency: "BRL", type: link.kind === "CREDIT" ? "CREDIT_CARD" : { in: [...CASH_ACCOUNT_TYPES] } } });
     if (!account) throw new Error(link.kind === "CREDIT" ? "Vincule cartões apenas a uma conta de cartão de crédito deste espaço." : "Escolha uma conta corrente, carteira, dinheiro ou reserva deste espaço.");
     const taken = await db.openFinanceAccountLink.findFirst({ where: { workspaceId: actor.workspaceId, accountId: input.accountId, isEnabled: true, id: { not: link.id } }, select: { displayName: true } });
     if (input.enabled && taken) throw new Error(`Esta conta do TBB já recebe lançamentos de “${taken.displayName}”. Duas fontes na mesma conta duplicariam valores.`);
   }
-  await db.openFinanceAccountLink.update({ where: { id: link.id }, data: { accountId: input.accountId, syncFromDate: day(input.syncFromDate), isEnabled: input.enabled } });
+  const from = day(input.syncFromDate);
+  const widened = Boolean(link.syncFromDate && (!from || from < link.syncFromDate));
+  await db.$transaction(async tx => {
+    if (input.accountId) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${actor.workspaceId}:${input.accountId}:financial-import`}, 0))`;
+    if (link.kind === "BANK" && input.accountId && widened) await rememberHistoryAnchor(tx, actor.workspaceId, input.accountId, link.id, link.syncFromDate!.toISOString().slice(0, 10));
+    await tx.openFinanceAccountLink.update({ where: { id: link.id }, data: { accountId: input.accountId, syncFromDate: from, isEnabled: input.enabled, ...(widened || input.accountId !== link.accountId ? { lastTransactionDate: null } : {}) } });
+  });
 }
 
 export async function ownerActor(db: DB, workspaceId: string): Promise<ImportActor | null> {

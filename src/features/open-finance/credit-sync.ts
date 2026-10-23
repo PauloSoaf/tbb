@@ -18,7 +18,9 @@ export async function prepareCreditSync(input: { prisma: PrismaClient; client: P
   const local = await input.prisma.cardStatement.findMany({ where: { workspaceId: input.actor.workspaceId, accountId: input.accountId, kind: "STATEMENT", status: "OPEN", rolledIntoStatementId: null, dueDate: { not: null } }, include: { payments: { select: { id: true, date: true, amountCents: true } } }, orderBy: { dueDate: "asc" } });
   const current = local.find(row => row.dueDate!.toISOString().slice(0, 10) >= input.asOfDate) ?? local.at(-1);
   const balanceCents = typeof input.remote.balance === "number" ? Math.round(input.remote.balance * 100) : null;
-  if (current && balanceCents !== null && Number.isSafeInteger(balanceCents) && balanceCents >= 0 && balanceCents <= 2147483647 && !validBills.some(bill => bill.dueDate === current.dueDate!.toISOString().slice(0, 10))) {
+  const publishedCurrent = validBills.some(bill => bill.status === "OPEN");
+  const matchingCurrentCycle = !currentDue || current?.dueDate?.toISOString().slice(0, 10) === currentDue;
+  if (current && !publishedCurrent && matchingCurrentCycle && balanceCents !== null && Number.isSafeInteger(balanceCents) && balanceCents >= 0 && balanceCents <= 2147483647 && !validBills.some(bill => bill.dueDate === current.dueDate!.toISOString().slice(0, 10))) {
     const payments = [...current.payments].sort((a, b) => a.id.localeCompare(b.id));
     const paidBeforeSnapshot = payments.filter(payment => payment.date && payment.date.toISOString().slice(0, 10) <= input.asOfDate).reduce((sum, payment) => sum + payment.amountCents, 0);
     if (balanceCents + paidBeforeSnapshot > 2147483647) throw new PluggyError("UNEXPECTED_RESPONSE");

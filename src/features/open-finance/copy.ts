@@ -1,5 +1,9 @@
 /** What the person reads. Provider error codes never reach the screen as they are, and never carry a response body. */
 const errors: Record<string, string> = {
+  BUSY: "Já existe uma sincronização em andamento. Aguarde a conclusão.",
+  DB_P2028: "O lote demorou além do esperado. Tente novamente para continuar o histórico sem duplicar registros.",
+  DETAIL_EXCEEDS_BILL: "Há compras que excedem o valor conciliado da fatura. Confira os detalhes em Importar e Faturas.",
+  DUPLICATE_PROVIDER_ID: "O banco repetiu um identificador com informações diferentes. Esse lote precisa de conferência.",
   INVALID_CREDENTIALS: "A Pluggy recusou o Client ID e o Client Secret configurados no servidor. Gere um novo Client Secret no Dashboard e atualize o .env.",
   UNAUTHORIZED: "A Pluggy recusou o acesso. Confira as credenciais configuradas no servidor.",
   NOT_FOUND: "A Pluggy não encontrou este Item ID. Confira se ele foi criado com o conector MeuPluggy, na mesma aplicação das credenciais.",

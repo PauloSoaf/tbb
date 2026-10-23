@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 const syncDue = vi.hoisted(() => vi.fn());
 const shared = vi.hoisted(() => vi.fn());
-vi.mock("@/features/open-finance/sync", () => ({ syncDueConnections: syncDue }));
+vi.mock("@/features/open-finance/setup", () => ({ syncEverythingDue: syncDue }));
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/features/open-finance/pluggy-client", () => ({ sharedPluggyClient: shared }));
 import { GET, POST } from "@/app/api/open-finance/cron/route";
 

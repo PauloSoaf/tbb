@@ -24,14 +24,19 @@ export async function financeCalendarMonth(workspaceId: string, month: string, s
     where: { workspaceId, isConsumption: true, date: { gte: start, lt: end }, source: { not: "QUICK_INCOME" } },
     select: {
       id: true, date: true, description: true, merchant: true, notes: true, amountCents: true,
-      type: true, source: true, cardStatementId: true, postedDate: true, occurredAt: true, occurredTimezone: true,
+      type: true, source: true, tags: true, cardStatementId: true, postedDate: true, occurredAt: true, occurredTimezone: true,
       account: { select: { name: true, type: true } },
       category: { select: { name: true } },
     },
     orderBy: [{ date: "asc" }, { createdAt: "asc" }],
   });
+  const pendingOpenFinanceCount = showStatementLinks ? await prisma.financialEvidence.count({ where: {
+    workspaceId, decision: "NEEDS_REVIEW", source: { fileName: { startsWith: "Open Finance ·" } },
+    AND: [{ candidate: { path: ["effectiveDate"], gte: `${month}-01` } }, { candidate: { path: ["effectiveDate"], lt: `${shiftMonth(month, 1)}-01` } }],
+  } }) : 0;
   return {
     month,
+    ...(pendingOpenFinanceCount ? { pendingOpenFinanceCount } : {}),
     entries: rows.map(row => ({
       id: row.id,
       day: row.date.toISOString().slice(0, 10),
@@ -41,6 +46,7 @@ export async function financeCalendarMonth(workspaceId: string, month: string, s
       amountCents: row.amountCents,
       type: row.type,
       source: row.source,
+      ...(row.tags?.includes("open-finance") ? { importOrigin: "OPEN_FINANCE" as const } : {}),
       accountName: row.account.name,
       categoryName: row.category?.name || null,
       isCardPurchase: row.account.type === "CREDIT_CARD",

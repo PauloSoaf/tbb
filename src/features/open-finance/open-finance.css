@@ -1,4 +1,10 @@
 .of-page{min-width:0}
+.of-linked-summary{display:flex;flex-wrap:wrap;gap:7px}
+.of-linked-summary .badge{white-space:normal;overflow-wrap:anywhere}
+.of-advanced>summary{cursor:pointer;font-weight:650}
+.of-advanced[open]>.of-accounts{margin:12px 0}
+.of-advanced>form{margin-top:10px}
+.of-map small{font-size:.68rem;color:var(--muted-foreground)}
 .of-bank-setup{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px;margin:0;padding:0;list-style:none}
 .of-bank-setup>li{display:flex;flex-direction:column;gap:14px;align-items:flex-start;padding:14px;border:1px solid var(--border);border-radius:10px;min-width:0}
 .of-institution-name{display:flex;gap:10px;align-items:center;min-width:0}

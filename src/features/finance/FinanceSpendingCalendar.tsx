@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState, useTransition, type FormEvent } f
 import { useRouter, useSearchParams } from "next/navigation";
 import { cacheCalendarMonth, cachedCalendarMonth, type CalendarCache } from "./calendar-cache";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, CreditCard, Plus, RotateCcw, X } from "lucide-react";
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, CreditCard, Plus, RefreshCw, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import { AppTooltip } from "@/components/ui/AppTooltip";
 import { useI18n } from "@/lib/i18n/I18nContext";
@@ -76,6 +76,11 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
   const error = !current && loadFailure?.month === month ? loadFailure.message : "";
   const days = useMemo(() => calendarMonthDays(month), [month]);
   const totalsByDay = useMemo(() => calendarDayTotals(current?.entries ?? [], today), [current, today]);
+  const entriesByDay = useMemo(() => {
+    const grouped: Record<string, FinanceCalendarMonth["entries"]> = {};
+    for (const entry of current?.entries ?? []) if (["EXPENSE", "INCOME", "REFUND"].includes(entry.type)) (grouped[entry.day] ??= []).push(entry);
+    return grouped;
+  }, [current]);
   const monthTotals = useMemo(() => calendarMonthTotals(totalsByDay, month), [totalsByDay, month]);
   const duesByDay = useMemo(() => calendarStatementDues(canManageCards ? statements : []), [statements, canManageCards]);
   const monthDueCents = useMemo(() => Object.entries(duesByDay).reduce((sum, [day, dues]) => day.startsWith(`${month}-`) ? sum + dues.reduce((total, due) => total + due.amountCents, 0) : sum, 0), [duesByDay, month]);
@@ -103,8 +108,8 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
     }
   }
 
-  // Returning from another financial screen/tab revalidates even the initial month.
-  // Coalesce focus + visibility events; a server snapshot also invalidates the 12-month cache.
+  // Background bank syncs do not navigate this tab. Poll while visible as well as on focus;
+  // a fresh server snapshot invalidates every cached month, including the initial month.
   const lastVisibilityRefresh = useRef(0);
   useEffect(() => {
     const onVisible = () => {
@@ -114,7 +119,9 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
     };
     window.addEventListener("focus", onVisible);
     document.addEventListener("visibilitychange", onVisible);
+    const interval = window.setInterval(onVisible, 30_000);
     return () => {
+      window.clearInterval(interval);
       window.removeEventListener("focus", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
     };
@@ -200,6 +207,7 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
     <header className="finance-cal-header">
       <div className="finance-cal-heading"><span className="finance-cal-brand"><CalendarDays size={18}/></span><div>{!compact && <span className="finance-cal-eyebrow">{copy.daily}</span>}<h2>{compact ? copy.compactTitle : copy.title}</h2>{!compact && <p>{copy.hint}</p>}</div>{compact && <Link className="finance-cal-full-link" href={`/finance/calendar?month=${month}&day=${selected}`}>{copy.full} <ArrowRight size={14}/></Link>}</div>
       <div className="finance-cal-actions">
+        <AppTooltip content={`${copy.refresh}. ${copy.autoRefresh}`}><button type="button" className="finance-cal-icon-button" aria-label={copy.refresh} onClick={() => { setMonths({}); router.refresh(); }}><RefreshCw size={15}/></button></AppTooltip>
         {canManageCards && <AppTooltip content={`${planning("plan")} · ${planning("limits")} · ${planning("goals")}`}><button type="button" className="finance-cal-icon-button" aria-label={planning("plan")} aria-pressed={showPlanning} onClick={() => setShowPlanning(value => !value)}><CalendarDays size={15}/></button></AppTooltip>}
         <button type="button" className="finance-cal-icon-button" onClick={() => moveBy(-1)} aria-label={copy.previous} disabled={month === "1900-01"}><ChevronLeft size={18}/></button>
         <label className="finance-cal-month-picker"><span>{title}</span><input aria-label={copy.chooseMonth} type="month" value={month} min="1900-01" max="9998-11" onChange={event => moveTo(event.target.value)}/></label>
@@ -209,6 +217,7 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
     </header>
     <div className="finance-cal-metrics" aria-live="polite" aria-busy={!current}><span><ArrowUpRight size={13}/> {copy.expenses} <strong>{current ? money(monthTotals.expenseCents) : "…"}</strong></span>{compact && monthTotals.scheduledExpenseCents > 0 && <span>{copy.scheduled}: <strong>{money(monthTotals.scheduledExpenseCents)}</strong></span>}{!compact && <><span><ArrowDownLeft size={13}/> {copy.income} <strong>{current ? money(monthTotals.incomeCents) : "…"}</strong></span><span className="finance-cal-result">{copy.result} <strong>{current ? money(monthTotals.incomeCents - monthTotals.expenseCents) : "…"}</strong></span></>}</div>
     {monthDueCents > 0 && <div className="finance-cal-dues-total"><AppTooltip content={copy.billHint}><span><CreditCard size={13} aria-hidden="true"/>{copy.billsDue} <strong>{money(monthDueCents)}</strong></span></AppTooltip></div>}
+    {Boolean(current?.pendingOpenFinanceCount) && <p className="finance-cal-pending"><strong>{current?.pendingOpenFinanceCount}</strong> {copy.pendingImports} <Link href="/finance/imports">{copy.reviewImports} →</Link></p>}
     {showPlanning && <div className="finance-cal-metrics" aria-label={planning("plan")}>{["limits","goals","plan"].map(kind=><label key={kind}><input type="checkbox" checked={markerKinds.includes(kind)} onChange={event=>setMarkerKinds(current=>event.target.checked?[...current,kind]:current.filter(value=>value!==kind))}/>{planning(kind)}</label>)}</div>}
     {!compact && (monthTotals.scheduledExpenseCents > 0 || monthTotals.scheduledIncomeCents > 0) && <div className="finance-cal-metrics"><span>{copy.scheduled} · {copy.expenses}: <strong>{money(monthTotals.scheduledExpenseCents)}</strong></span><span>{copy.income}: <strong>{money(monthTotals.scheduledIncomeCents)}</strong></span></div>}
     <div className="finance-cal-body" data-compact={compact || undefined}>
@@ -221,6 +230,7 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
               const outside = !day.startsWith(`${month}-`);
               const value = outside ? undefined : totalsByDay[day];
               const selectedDay = day === selected;
+              const dailyEntries = outside ? [] : entriesByDay[day] ?? [];
               const dues = outside ? [] : duesByDay[day] ?? [];
               const dueCents = dues.reduce((sum, due) => sum + due.amountCents, 0);
               const billLabel = dues.length ? `, ${copy.billsDue.toLowerCase()} ${money(dueCents)} · ${dues.map(due => statementName(due.accountId)).join(", ")}` : "";
@@ -228,6 +238,12 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
               const cell = <button type="button" className="finance-cal-day" data-scheduled={day > today || undefined} data-selected={selectedDay || undefined} data-today={day === today || undefined} data-outside={outside || undefined} data-bills={dues.length > 0 || undefined} data-spending={Boolean(value?.expenseCents || value?.scheduledExpenseCents) || undefined} onClick={() => selectDay(day)} aria-label={dailyLabel + billLabel} aria-pressed={selectedDay} aria-expanded={compact ? selectedDay && compactDetails : undefined} aria-controls={compact ? "finance-cal-details" : undefined} data-day={day} disabled={!isDateKey(day) || !isMonthKey(day.slice(0, 7)) || day.startsWith("9998-12") || (!current && !outside && !dues.length)}>
                 <span className="finance-cal-day-number">{Number(day.slice(8))}</span>
                 <span className="finance-cal-day-money">{!outside && (value?.expenseCents || value?.scheduledExpenseCents) ? `−${cellMoney(value.expenseCents + value.scheduledExpenseCents)}` : ""}</span>
+                {!compact && dailyEntries.length > 0 && <span className="finance-cal-day-previews" role="list" aria-label={copy.entries}>
+                  {dailyEntries.slice(0, 3).map(entry => <span key={entry.id} role="listitem" className="finance-cal-day-preview" data-positive={entry.type === "INCOME" || entry.type === "REFUND" || undefined} title={`${entry.merchant || entry.description} · ${money(entry.amountCents)}`}>
+                    <span>{entry.isCardPurchase && <CreditCard size={10} aria-hidden="true"/>}{entry.merchant || entry.description}</span><b>{entry.type === "INCOME" || entry.type === "REFUND" ? "+" : entry.type === "EXPENSE" ? "−" : ""}{compactMoney(entry.amountCents)}</b>
+                  </span>)}
+                  {dailyEntries.length > 3 && <span className="finance-cal-day-more">+{dailyEntries.length - 3} {copy.moreEntries}</span>}
+                </span>}
                 {dues.length > 0 && <span className="finance-cal-bill-badge"><CreditCard size={compact ? 9 : 11} aria-hidden="true"/><span>{cellMoney(dueCents)}</span></span>}
                 {showPlanning && !outside && activeMarkers.some(marker => marker.date === day) && <span className="finance-cal-plan-dot" title={activeMarkers.filter(marker => marker.date === day).map(marker => `${planning(marker.kind)}: ${marker.label} · ${money(marker.amountCents)}`).join("; ")}>◷</span>}
                 <span className="finance-cal-day-dots" aria-hidden="true">{Boolean(value?.incomeCents || value?.scheduledIncomeCents) && <i className="income"/>}{Boolean(value?.expenseCents || value?.scheduledExpenseCents) && <i className="expense"/>}</span>
@@ -258,7 +274,7 @@ export function FinanceSpendingCalendar({ initialMonth, today, accounts, categor
             const positive = entry.type === "INCOME" || entry.type === "REFUND";
             return <article className="finance-cal-entry" key={entry.id}>
               <span className="finance-cal-entry-icon" data-positive={positive || undefined}>{positive ? <ArrowDownLeft size={16}/> : entry.type === "TRANSFER" ? <ArrowRight size={16}/> : <ArrowUpRight size={16}/>}</span>
-              <div><strong>{entry.merchant || entry.description}</strong>{entry.notes && <small className="finance-cal-note" title={entry.notes}>{notePreview(entry.notes, 140)}</small>}<small>{entry.merchant ? `${entry.description} · ` : ""}{entry.categoryName || (entry.type === "TRANSFER" ? copy.transfer : entry.type === "ADJUSTMENT" ? copy.adjustment : copy.noCategory)} · {entry.accountName}</small>{entry.isCardPurchase && <small><CreditCard size={11} className="inline mr-1"/>{entry.cardStatementId ? copy.linked : copy.cardPurchase}</small>}{entry.occurredAt && entry.occurredTimezone && <small>{new Date(entry.occurredAt).toLocaleTimeString(locale, { timeZone: entry.occurredTimezone, hour: "2-digit", minute: "2-digit" })} · {entry.occurredTimezone}</small>}{entry.postedDate && entry.postedDate !== entry.day && <small>{copy.postedDate}: {entry.postedDate}</small>}{entry.day > today && <small>{copy.scheduled}</small>}</div>
+              <div><strong>{entry.merchant || entry.description}</strong>{entry.notes && <small className="finance-cal-note" title={entry.notes}>{notePreview(entry.notes, 140)}</small>}<small>{entry.importOrigin === "OPEN_FINANCE" ? "Pluggy · " : ""}{entry.merchant ? `${entry.description} · ` : ""}{entry.categoryName || (entry.type === "TRANSFER" ? copy.transfer : entry.type === "ADJUSTMENT" ? copy.adjustment : copy.noCategory)} · {entry.accountName}</small>{entry.isCardPurchase && <small><CreditCard size={11} className="inline mr-1"/>{entry.cardStatementId ? copy.linked : copy.cardPurchase}</small>}{entry.occurredAt && entry.occurredTimezone && <small>{new Date(entry.occurredAt).toLocaleTimeString(locale, { timeZone: entry.occurredTimezone, hour: "2-digit", minute: "2-digit" })} · {entry.occurredTimezone}</small>}{entry.postedDate && entry.postedDate !== entry.day && <small>{copy.postedDate}: {entry.postedDate}</small>}{entry.day > today && <small>{copy.scheduled}</small>}</div>
               <strong className="finance-cal-entry-amount" data-positive={positive || undefined}>{positive ? "+" : entry.type === "TRANSFER" || entry.type === "ADJUSTMENT" ? "" : "−"}{money(entry.amountCents)}</strong>
             </article>;
           })}

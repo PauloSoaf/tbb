@@ -5,7 +5,7 @@ import { ActionForm } from "@/components/ui/ActionForm";
 import { KeepFormValues } from "@/components/ui/KeepFormValues";
 import { Modal } from "@/components/ui/Modal";
 import { money } from "@/features/finance/money";
-import { addOpenFinanceConnection, mapOpenFinanceAccount, pauseOpenFinanceConnection, removeOpenFinanceConnection, reviewOpenFinanceBill, syncOpenFinanceNow } from "./actions";
+import { addOpenFinanceConnection, mapOpenFinanceAccount, pauseOpenFinanceConnection, removeOpenFinanceConnection, reviewOpenFinanceBill, syncAllOpenFinanceConnections, syncOpenFinanceNow, syncOpenFinanceSelection } from "./actions";
 import { accountKindLabel, connectionStatusLabel, openFinanceError, runStatusLabel } from "./copy";
 import type { OpenFinanceOverview } from "./queries";
 import { connectionInstitution, INSTITUTIONS, type Institution } from "./institutions";
@@ -23,6 +23,7 @@ function AddConnection({ count, institution }: { count: number; institution?: In
     <KeepFormValues><ActionForm key={count} action={addOpenFinanceConnection} className="stack" resetOnSuccess={false}>
       <label>Nome da conexão<input name="label" required maxLength={80} defaultValue={institution?.name ?? ""} placeholder="Ex.: Nubank" autoComplete="off"/></label>
       <label>Item ID<input name="itemId" required placeholder="00000000-0000-0000-0000-000000000000" autoComplete="off" spellCheck={false}/></label>
+      <p className="muted text-sm">Por padrão, sincroniza todas as contas, cartões e faturas com o histórico mais antigo disponível. Reutiliza os registros identificados; vínculos ambíguos ficam para sua escolha.</p>
       <p className="muted text-sm">Copie o Item ID em Aplicações → sua aplicação → Demo → Itens conectados, no Dashboard da Pluggy. Ele é guardado criptografado e nunca aparece de novo na tela.</p>
       <button className="button" type="submit">Adicionar</button>
     </ActionForm></KeepFormValues>
@@ -54,12 +55,12 @@ function AccountRow({ account, tbb }: { account: Connection["accounts"][number];
     <KeepFormValues><ActionForm key={`${account.accountId}|${account.syncFromDate}|${account.isEnabled}`} action={mapOpenFinanceAccount} className="of-map" resetOnSuccess={false}>
         <input type="hidden" name="linkId" value={account.id}/>
         <label>{isCard ? "Cartão do TBB" : "Conta do TBB"}<select name="accountId" defaultValue={account.accountId ?? ""}><option value="">Não vincular</option>{compatible.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <label>{isCard ? "Compras a partir de" : "Importar a partir de"}<input type="date" name="syncFromDate" defaultValue={account.syncFromDate ?? ""}/></label>
+        <label>Limitar a partir de (opcional)<input type="date" name="syncFromDate" defaultValue={account.syncFromDate ?? ""}/><small>Vazio = todo o histórico disponível</small></label>
         <label className="of-check"><input type="checkbox" name="enabled" defaultChecked={account.isEnabled}/><span>Sincronizar esta conta</span></label>
         <button className="button-secondary" type="submit">Salvar</button>
       </ActionForm></KeepFormValues>
     {isCard && <p className="muted text-xs">Faturas são conciliadas pelo vencimento. Compras entram como detalhamento já incluído no total; parcelas futuras exigem dados confirmados. Pagamentos e divergências aguardam revisão.</p>}
-    {!isCard && <p className="muted text-xs">Movimentos anteriores à data de início nunca são importados, para não alterar o saldo que o TBB já acompanha.{account.lastTransactionDate ? ` Último movimento lido: ${dayLabel(account.lastTransactionDate)}.` : ""}</p>}
+    {!isCard && <p className="muted text-xs">Importações anteriores a um saldo já conferido preservam essa referência de saldo.{account.lastTransactionDate ? ` Último movimento lido: ${dayLabel(account.lastTransactionDate)}.` : ""}</p>}
     {drift !== null && <p className="of-drift" data-off={drift !== 0 || undefined}>{drift === 0 ? "O saldo do TBB confere com o do banco." : <>Saldo do TBB {money(mapped!.balanceCents)} · diferença {money(drift)}. <Link href="/finance/accounts">Conferir em Atualizar saldos →</Link></>}</p>}
   </li>;
 }
@@ -98,13 +99,18 @@ function ConnectionCard({ connection, tbb }: { connection: Connection; tbb: TbbC
     </dl>
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="row">
-      {!paused && <ActionForm action={syncOpenFinanceNow} resetOnSuccess={false}><input type="hidden" name="connectionId" value={connection.id}/><button className="button" type="submit"><RefreshCw size={14}/>Sincronizar agora</button></ActionForm>}
+      {!paused && <ActionForm action={syncOpenFinanceNow} resetOnSuccess={false}><input type="hidden" name="connectionId" value={connection.id}/><button className="button" type="submit"><RefreshCw size={14}/>Sincronizar tudo</button></ActionForm>}
       <ActionForm action={pauseOpenFinanceConnection}><input type="hidden" name="connectionId" value={connection.id}/><input type="hidden" name="paused" value={resumable ? "0" : "1"}/><button className="button-secondary" type="submit">{resumable ? "Retomar" : "Pausar"}</button></ActionForm>
       <Modal title={`Remover ${connection.label}`} trigger="Remover"><ActionForm action={removeOpenFinanceConnection} className="stack"><input type="hidden" name="connectionId" value={connection.id}/><p>A sincronização para. Os lançamentos que já vieram desta conexão continuam no TBB; só o vínculo com o banco é removido.</p><button className="button" type="submit">Remover conexão</button></ActionForm></Modal>
     </div>
-    <p className="muted text-xs">O Meu Pluggy atualiza os dados do banco a cada 24 horas e não aceita atualização manual. “Sincronizar agora” traz para o TBB o que o Meu Pluggy já tem.</p>
-    {connection.accounts.length > 0 ? <ul className="of-accounts">{connection.accounts.map((account) => <AccountRow key={account.id} account={account} tbb={tbb}/>)}</ul>
-      : <p className="muted text-sm">Nenhuma conta listada ainda. Use “Sincronizar agora” para o TBB buscar as contas deste banco.</p>}
+    <p className="muted text-sm">Todas as contas, cartões e faturas · todo o histórico disponível. Faturas abertas usam os valores confirmados pelo banco; pagamentos e histórico quitado são preservados.</p>
+    <p className="muted text-xs">O Meu Pluggy atualiza os dados do banco a cada 24 horas. O TBB busca o que já está disponível; o calendário se atualiza automaticamente.</p>
+    {connection.accounts.length > 0 && <div className="of-linked-summary">{connection.accounts.map(account => <span className="badge" key={account.id}>{account.displayName}{account.maskedNumber ? ` · ${account.maskedNumber}` : ""} · {account.accountId && account.isEnabled ? "Sincronizando" : "Precisa de vínculo"}</span>)}</div>}
+    <details className="of-advanced"><summary>Ajustes avançados de contas e período</summary>
+      <p className="muted text-xs">Só é necessário escolher o vínculo quando há mais de um cartão possível. Para uma seleção personalizada, ajuste abaixo e use Sincronizar seleção. A execução agendada respeita essas escolhas.</p>
+      {connection.accounts.length > 0 ? <ul className="of-accounts">{connection.accounts.map((account) => <AccountRow key={account.id} account={account} tbb={tbb}/>)}</ul> : <p className="muted text-sm">Use Sincronizar tudo para descobrir os produtos deste banco.</p>}
+      <ActionForm action={syncOpenFinanceSelection} resetOnSuccess={false}><input type="hidden" name="connectionId" value={connection.id}/><button className="button-secondary" type="submit">Sincronizar seleção</button></ActionForm>
+    </details>
     {connection.runs.length > 0 && <details><summary>Histórico de sincronizações</summary>
       <div className="table-wrap"><table><thead><tr><th>Quando</th><th>Origem</th><th>Resultado</th><th>Lidos</th><th>Criados</th><th>Revisar</th><th>Já conhecidos</th></tr></thead><tbody>
         {connection.runs.map((run) => <tr key={run.id}><td>{when(run.startedAt)}</td><td>{run.trigger === "CRON" ? "Agendada" : "Manual"}</td><td>{runStatusLabel[run.status] ?? run.status}{run.errorCode ? ` · ${run.errorCode}` : ""}</td><td>{run.transactionsFetched}</td><td>{run.autoCreated}</td><td>{run.needsReview}</td><td>{run.alreadyKnown}</td></tr>)}
@@ -120,6 +126,7 @@ export function OpenFinancePanel({ overview, tbbAccounts, migrationReady }: { ov
         <li data-ok={overview.configured || undefined}><strong>Credenciais da Pluggy</strong><span>{overview.configured ? "Configuradas no servidor" : "Faltam PLUGGY_CLIENT_ID e PLUGGY_CLIENT_SECRET no .env"}</span></li>
         <li data-ok={migrationReady || undefined}><strong>Tabelas da integração</strong><span>{migrationReady ? "Prontas" : "Migração pendente: rode npm run prisma:deploy"}</span></li>
       </ul>
+      {migrationReady && overview.configured && overview.connections.length > 0 && <ActionForm action={syncAllOpenFinanceConnections} resetOnSuccess={false}><button className="button" type="submit"><RefreshCw size={14}/>Sincronizar todos os bancos · histórico completo</button></ActionForm>}
       <details open={!overview.configured || overview.connections.length === 0}><summary>Como conectar um banco, passo a passo</summary>
         <ol className="of-steps">
           <li>Crie sua conta gratuita em <a href="https://meu.pluggy.ai" target="_blank" rel="noreferrer">meu.pluggy.ai</a> e conecte cada banco por lá. Cada banco é autorizado separadamente.</li>

@@ -7,6 +7,7 @@ import { applyRules } from "./import-engine";
 import { matchRowsToOwnTransfers } from "./import-transfer-match";
 import { ownTransfersFor } from "./own-transfers";
 import type { ParsedDocument } from "./document-parsers";
+import { preserveHistoricalBalances } from "@/features/open-finance/history";
 
 export type ImportActor = { workspaceId: string; userId: string; role: string };
 type DB = Prisma.TransactionClient;
@@ -73,6 +74,7 @@ export async function previewFinancialEvidence(db: DB, actor: ImportActor, sourc
     const fingerprint = evidenceFingerprint(actor.workspaceId, source.accountId, source.sha256, candidate);
     const related = candidate.relatedLocator ? evidence.find(parent => parent.sourceId === source.id && parent.locator === candidate.relatedLocator) : null;
     const match = reconcileCandidate(candidate, transactions.filter(t => t.accountId === source.accountId).map(t => ({ ...t, date: day(t.date) })), fingerprint, e.transactionId || related?.transactionId || null);
+    if (e.decision === "NEEDS_REVIEW" && e.reason?.startsWith("O detalhamento ultrapassa o valor conciliado")) Object.assign(match, { action: "CONFLICT", reason: e.reason });
     if (e.decision === "COMMITTED" && candidate.eventKind === "METADATA_REVIEW") Object.assign(match, { action: "KEEP", reason: "Metadados já revisados nesta origem." });
     if (e.decision === "IGNORE") Object.assign(match, { action: "IGNORE", reason: e.reason || "Ignorada em revisão anterior." });
     if (candidate.eventKind === "CARD_PAYMENT") {
@@ -125,6 +127,7 @@ export async function confirmFinancialEvidence(db: DB, actor: ImportActor, sourc
   const preview = await previewFinancialEvidence(db, actor, sourceIds);
   if (token !== preview.token) throw new Error("A revisão mudou. Atualize a prévia antes de confirmar.");
   const counts = { created: 0, linked: 0, enriched: 0, payments: 0, kept: 0, ignored: 0 };
+  const createdIds: string[] = [];
   const batches = new Set<string>();
   for (const decision of decisions) {
     const proposed = preview.rows.find(r => r.id === decision.id);
@@ -189,10 +192,11 @@ export async function confirmFinancialEvidence(db: DB, actor: ImportActor, sourc
         occurredAt: row.occurredAt ? new Date(row.occurredAt) : null, occurredTimezone: row.timezone, dateBasis: row.dateBasis, eventKind: row.eventKind, isConsumption: row.eventKind !== "FINANCING_INSTALLMENT",
         installmentNumber: row.installmentNumber, installmentTotal: row.installmentTotal, originalCurrency: row.originalCurrency, originalAmountCents: row.originalAmountCents, exchangeRate: row.exchangeRate,
         categoryId: row.categoryId, tags: row.tags, subscriptionId: row.subscriptionId, recurring: Boolean(row.subscriptionId), source: "DOCUMENT_V2", cardStatementId: statement?.id || null, statementDetailMode: statement ? "ALREADY_INCLUDED" : null, competenceDate: statement?.dueDate || null,
-      } }); transactionId = created.id; counts.created++;
+      } }); transactionId = created.id; createdIds.push(created.id); counts.created++;
     }
     await db.financialEvidence.update({ where: { id: evidence.id }, data: { transactionId, paymentId, decision: "COMMITTED", reviewedByUserId: actor.userId, reviewedAt: new Date(), version: { increment: 1 } } });
   }
+  await preserveHistoricalBalances(db, actor.workspaceId, createdIds);
   for (const batchId of batches) {
     const [remaining, committed, ignored] = await Promise.all([db.financialEvidence.count({ where: { workspaceId: actor.workspaceId, importBatchId: batchId, decision: "NEEDS_REVIEW" } }), db.financialEvidence.count({ where: { workspaceId: actor.workspaceId, importBatchId: batchId, decision: "COMMITTED" } }), db.financialEvidence.count({ where: { workspaceId: actor.workspaceId, importBatchId: batchId, decision: "IGNORE" } })]);
     await db.importBatch.update({ where: { id: batchId }, data: { status: remaining ? "NEEDS_REVIEW" : "COMPLETED", importedCount: committed, failedCount: remaining, duplicateCount: ignored, completedAt: remaining ? null : new Date() } });
@@ -209,7 +213,7 @@ export async function reviewEvidenceCandidate(db: DB, actor: ImportActor, eviden
   const row = candidateSchema.parse(candidate), original = candidateSchema.parse(current.originalCandidate);
   await validateReferences(db, actor, current.source.accountId, row);
   const revised = { ...row, locator: original.locator, relatedLocator: original.relatedLocator, rawDescription: original.rawDescription, rawDate: original.rawDate, rawAmount: original.rawAmount };
-  await db.financialEvidence.update({ where: { id: current.id }, data: { candidate: json(revised), version: { increment: 1 }, reviewedByUserId: actor.userId, reviewedAt: new Date() } });
+  await db.financialEvidence.update({ where: { id: current.id }, data: { candidate: json(revised), reason: null, version: { increment: 1 }, reviewedByUserId: actor.userId, reviewedAt: new Date() } });
   await db.financialSnapshot.create({ data: { workspaceId: actor.workspaceId, accountId: current.source.accountId, sourceId: current.source.id, locator: `review:${current.id}:${current.version + 1}`, kind: "EVIDENCE_REVIEW", asOfDate: dateOnly(new Date().toISOString().slice(0, 10)), payload: json({ evidenceId: current.id, actorUserId: actor.userId, before: current.candidate, after: revised, fromVersion: current.version, toVersion: current.version + 1 }) } });
   if (current.importBatchId) await audit(db, actor, current.importBatchId, "finance.evidence_reviewed", { evidenceId: current.id, version: current.version + 1, detailsStoredPrivately: true });
 }

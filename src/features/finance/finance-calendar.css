@@ -66,3 +66,22 @@
 .finance-cal-note{display:block;color:var(--muted-foreground);font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .finance-cal-plan-dot{position:absolute;right:3px;top:1px;color:var(--chart-5);font-size:.75rem}.finance-cal-plan-entry{display:grid;grid-template-columns:1fr auto;gap:4px;font-size:.75rem;border:1px dashed var(--chart-5);border-radius:8px;padding:8px}.finance-cal-plan-entry small{grid-column:1/-1;color:var(--muted-foreground);font-size:.65rem}
+
+/* The dedicated page gives the month grid room for three readable daily entries. */
+.finance-spending-calendar.is-full .finance-cal-body{grid-template-columns:minmax(0,1fr) minmax(280px,320px)}
+.finance-spending-calendar.is-full .finance-cal-day{min-height:142px;justify-content:flex-start;gap:7px;padding:10px}
+.finance-spending-calendar.is-full .finance-cal-day-number{font-size:.88rem}
+.finance-spending-calendar.is-full .finance-cal-day-money{font-size:.76rem}
+.finance-spending-calendar.is-full .finance-cal-day-dots{margin-top:auto}
+.finance-cal-day-previews{display:flex;flex-direction:column;gap:4px;width:100%;min-width:0}
+.finance-cal-day-preview{display:flex;align-items:center;justify-content:space-between;gap:4px;width:100%;min-width:0;font-size:.66rem;color:var(--cal-red);line-height:1.45}
+.finance-cal-day-preview[data-positive]{color:var(--cal-green)}
+.finance-cal-day-preview>span{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.finance-cal-day-preview svg{display:inline;vertical-align:middle;margin-right:3px}
+.finance-cal-day-preview b{flex-shrink:0;font-size:.62rem;font-variant-numeric:tabular-nums}
+.finance-cal-day-more{color:var(--primary);font-size:.63rem;font-weight:700}
+.finance-cal-pending{margin:0;padding:9px 18px;border-bottom:1px solid var(--border);font-size:.73rem;color:var(--muted-foreground)}
+.finance-cal-pending a{color:var(--primary);font-weight:650;text-decoration:underline}
+.finance-spending-calendar.is-full .finance-cal-entry-list{max-height:560px}
+@media(max-width:1150px){.finance-spending-calendar.is-full .finance-cal-body{grid-template-columns:minmax(0,1fr)}.finance-spending-calendar.is-full .finance-cal-day-panel{border-left:0;border-top:1px solid var(--border)}}
+@media(max-width:760px){.finance-spending-calendar.is-full .finance-cal-day{min-height:118px;padding:6px 4px;gap:5px}.finance-spending-calendar.is-full .finance-cal-day-number{font-size:.76rem}.finance-spending-calendar.is-full .finance-cal-day-money{font-size:.6rem}.finance-cal-day-preview{font-size:.6rem}.finance-cal-day-preview b{display:none}.finance-cal-day-preview svg{display:none}.finance-cal-day-more{font-size:.54rem}}

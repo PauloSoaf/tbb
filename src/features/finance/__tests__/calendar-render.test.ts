@@ -16,6 +16,16 @@ const props = { today: "2032-02-29", initialMonth: { month: "2032-02", entries: 
 const render = (extra: Partial<Parameters<typeof FinanceSpendingCalendar>[0]> = {}) => renderToStaticMarkup(createElement(FinanceSpendingCalendar, { ...props, ...extra }));
 beforeEach(() => { state.search = "month=2032-02&day=2032-02-29"; });
 describe("calendar presentation", () => {
+  it("previews three daily entries on the full page and keeps the full selected-day list", () => {
+    const entries = Array.from({ length: 4 }, (_, index) => ({ id: `day-entry-${index}`, day: "2032-02-29", description: `Synthetic purchase ${index}`, merchant: null, amountCents: 100 + index, type: "EXPENSE" as const, source: "DOCUMENT_V2", accountName: "Synthetic bank", categoryName: null, isCardPurchase: false, cardStatementId: null }));
+    const full = render({ initialMonth: { month: "2032-02", entries } });
+    const cell = full.match(/<button[^>]*data-day="2032-02-29"[^>]*>[\s\S]*?<\/button>/)?.[0] ?? "";
+    expect(cell.match(/class="finance-cal-day-preview"/g)).toHaveLength(3);
+    expect(cell).toContain("+1 outros");
+    expect(cell).not.toContain("Synthetic purchase 3");
+    expect(full.match(/class="finance-cal-entry"/g)).toHaveLength(4);
+    expect(render({ compact: true, initialMonth: { month: "2032-02", entries } })).not.toContain('class="finance-cal-day-previews"');
+  });
   it("shows a compact seven-column month with collapsed details and independent dashboard parameters", () => {
     state.search = "scope=me&month=2040-07&day=2040-07-12";
     const html = render({ compact: true });

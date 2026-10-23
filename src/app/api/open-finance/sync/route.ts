@@ -3,7 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/workspace";
 import { sharedPluggyClient } from "@/features/open-finance/pluggy-client";
-import { syncConnection } from "@/features/open-finance/sync";
+import { syncEverything } from "@/features/open-finance/setup";
+import { revalidatePath } from "next/cache";
 import { openFinanceError } from "@/features/open-finance/copy";
 
 const body = z.object({ connectionId: z.string().min(1).max(100) });
@@ -15,7 +16,8 @@ export async function POST(request: Request) {
   const client = sharedPluggyClient("interactive");
   if (!client) return NextResponse.json({ error: "Credenciais da Pluggy não configuradas no servidor." }, { status: 503 });
   try {
-    const summary = await syncConnection({ prisma, client }, context, parsed.data.connectionId, "MANUAL");
+    const summary = await syncEverything({ prisma, client }, context, parsed.data.connectionId);
+    revalidatePath("/finance", "layout");
     return NextResponse.json({ ...summary, message: summary.errorCode ? openFinanceError(summary.errorCode) : null }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Falha na sincronização." }, { status: 404 });
