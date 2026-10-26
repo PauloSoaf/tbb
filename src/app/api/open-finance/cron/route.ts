@@ -18,8 +18,10 @@ async function run(request: Request) {
   if (!client) return NextResponse.json({ error: "Credenciais da Pluggy não configuradas." }, { status: 503 });
   const results = await syncEverythingDue({ prisma, client });
   if (results.length) revalidatePath("/finance", "layout");
+  const failed = results.filter(result => !["SUCCESS", "PAUSED", "BUSY"].includes(result.status)).length;
+  const status = !failed ? 200 : failed === results.length ? 503 : 207;
   // Counts and codes only: nothing financial leaves in the response or the logs.
-  return NextResponse.json({ connections: results.length, results: results.map(({ status, errorCode, autoCreated, needsReview }) => ({ status, errorCode, autoCreated, needsReview })) }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ connections: results.length, results: results.map(({ status, errorCode, autoCreated, needsReview }) => ({ status, errorCode, autoCreated, needsReview })) }, { status, headers: { "Cache-Control": "no-store" } });
 }
 export const GET = run;
 export const POST = run;

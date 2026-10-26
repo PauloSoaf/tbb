@@ -12,6 +12,19 @@ import type { PluggyAccount } from "./pluggy-schemas";
 import { revealItemId } from "./secret";
 import { MIN_CRON_INTERVAL_MS, syncConnection, type SyncDeps } from "./sync";
 
+const infrastructureErrors = new Set(["NETWORK_ERROR", "NETWORK_TIMEOUT", "DNS_ERROR", "TLS_ERROR", "PROVIDER_UNAVAILABLE", "RATE_LIMITED", "INVALID_CREDENTIALS", "UNAUTHORIZED"]);
+
+/** Discovery can fail before syncConnection creates its run. Record that attempt too,
+ * while preserving the last successful date, active leases and all financial records. */
+async function recordDiscoveryFailure(deps: SyncDeps, actor: ImportActor, connectionId: string, trigger: "MANUAL" | "CRON", error: PluggyError) {
+  if (error.code === "BUSY") return;
+  const now = deps.now?.() ?? new Date();
+  await deps.prisma.$transaction(async db => {
+    const updated = await db.openFinanceConnection.updateMany({ where: { id: connectionId, workspaceId: actor.workspaceId, status: { in: ["ACTIVE", "ERROR"] }, OR: [{ syncLeaseUntil: null }, { syncLeaseUntil: { lt: now } }] }, data: { status: error.code === "CONSENT_EXPIRED" ? "CONSENT_EXPIRED" : "ERROR", lastErrorCode: error.code, lastErrorAt: now } });
+    if (updated.count) await db.openFinanceSyncRun.create({ data: { workspaceId: actor.workspaceId, connectionId, trigger, status: "ERROR", startedAt: now, finishedAt: now, errorCode: error.code } });
+  });
+}
+
 const day = (date: Date) => date.toISOString().slice(0, 10);
 const after = (value: string) => day(new Date(Date.parse(`${value}T00:00:00Z`) + 86400000));
 const normal = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -96,7 +109,12 @@ export async function configureAllAccounts(deps: SyncDeps, actor: ImportActor, c
 
 /** Explicit "sync everything" uses bank values for unambiguous open bills; protected cases stay in review. */
 export async function syncEverything(deps: SyncDeps, actor: ImportActor, connectionId: string, trigger: "MANUAL" | "CRON" = "MANUAL") {
-  const setup = await configureAllAccounts(deps, actor, connectionId, trigger === "MANUAL");
+  let setup;
+  try { setup = await configureAllAccounts(deps, actor, connectionId, trigger === "MANUAL"); }
+  catch (error) {
+    if (error instanceof PluggyError) await recordDiscoveryFailure(deps, actor, connectionId, trigger, error);
+    throw error;
+  }
   const first = await syncConnection(deps, actor, connectionId, trigger);
   if (!["SUCCESS", "PARTIAL"].includes(first.status)) return { ...first, ...setup };
   const links = await deps.prisma.openFinanceAccountLink.findMany({ where: { workspaceId: actor.workspaceId, connectionId, isEnabled: true, accountId: { not: null } }, select: { id: true, accountId: true } });
@@ -123,12 +141,21 @@ export async function syncEverythingDue(deps: SyncDeps) {
   const now = deps.now?.() ?? new Date();
   const connections = await deps.prisma.openFinanceConnection.findMany({ where: { status: { in: ["ACTIVE", "ERROR"] } }, select: { id: true, workspaceId: true, lastSyncedAt: true } });
   const results = [];
+  let unavailable: PluggyError | null = null;
   for (const connection of connections) {
     if (connection.lastSyncedAt && now.getTime() - connection.lastSyncedAt.getTime() < MIN_CRON_INTERVAL_MS) continue;
     const actor = await ownerActor(deps.prisma, connection.workspaceId);
     if (!actor) continue;
-    try { results.push(await syncEverything(deps, actor, connection.id, "CRON")); }
-    catch (error) { results.push({ status: "ERROR" as const, errorCode: error instanceof PluggyError ? error.code : "SYNC_FAILED", autoCreated: 0, needsReview: 0 }); }
+    try {
+      if (unavailable) { await recordDiscoveryFailure(deps, actor, connection.id, "CRON", unavailable); throw unavailable; }
+      const result = await syncEverything(deps, actor, connection.id, "CRON");
+      results.push(result);
+      if (result.errorCode && infrastructureErrors.has(result.errorCode)) unavailable = new PluggyError(result.errorCode);
+    }
+    catch (error) {
+      if (error instanceof PluggyError && infrastructureErrors.has(error.code)) unavailable = error;
+      results.push({ status: "ERROR" as const, errorCode: error instanceof PluggyError ? error.code : "SYNC_FAILED", autoCreated: 0, needsReview: 0 });
+    }
   }
   return results;
 }

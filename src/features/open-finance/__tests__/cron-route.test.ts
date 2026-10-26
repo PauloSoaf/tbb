@@ -44,8 +44,15 @@ describe("scheduled sync endpoint", () => {
   it("runs the sync and answers with counts and codes only", async () => {
     syncDue.mockResolvedValue([{ status: "SUCCESS", runId: "run-1", autoCreated: 3, needsReview: 1, staged: 4, alreadyKnown: 9, accountsSeen: 2, transactionsFetched: 40, pendingSkipped: 0, outsideWindow: 0 }, { status: "ERROR", errorCode: "RATE_LIMITED", autoCreated: 0, needsReview: 0 }]);
     const response = await call("GET", `Bearer ${SECRET}`);
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(207);
     expect(await response.json()).toEqual({ connections: 2, results: [{ status: "SUCCESS", autoCreated: 3, needsReview: 1 }, { status: "ERROR", errorCode: "RATE_LIMITED", autoCreated: 0, needsReview: 0 }] });
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("does not report HTTP success when every connection failed", async () => {
+    syncDue.mockResolvedValue([{status:"ERROR",errorCode:"NETWORK_TIMEOUT",autoCreated:0,needsReview:0}]);
+    const response=await call("POST",`Bearer ${SECRET}`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({results:[{errorCode:"NETWORK_TIMEOUT"}]});
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPluggyClient, PluggyError } from "../pluggy-client";
+import { createPluggyClient, PluggyError, pluggyTransportError } from "../pluggy-client";
 
 type Step = { status?: number; body?: unknown; headers?: Record<string, string>; throws?: boolean };
 /** A scripted fetch: each call consumes the next step for its path, so a test states exactly what the provider does. */
@@ -25,6 +25,37 @@ const make = (routes: Record<string, Step[]>, extra = {}) => {
 const tx = (id: string, extra = {}) => ({ id, accountId: "acc", description: "d", amount: 10, date: "2026-10-01T00:00:00.000Z", type: "DEBIT", status: "POSTED", ...extra });
 
 describe("Pluggy client", () => {
+  it.each([
+    [{ name: "TimeoutError", code: 23 }, "NETWORK_TIMEOUT"],
+    [{ cause: { code: "UND_ERR_CONNECT_TIMEOUT" } }, "NETWORK_TIMEOUT"],
+    [{ cause: { code: "ENOTFOUND" } }, "DNS_ERROR"],
+    [{ cause: { code: "CERT_HAS_EXPIRED" } }, "TLS_ERROR"],
+    [{ cause: { code: "ECONNRESET" } }, "NETWORK_ERROR"],
+  ])("classifies transport failures without exposing their messages", (error, expected) => {
+    expect(pluggyTransportError({ ...error, message: "https://private.example.invalid/?secret=do-not-expose" })).toBe(expected);
+  });
+
+  it("shares an authentication in flight across concurrent discovery requests", async () => {
+    const { client, calls } = make({ "/auth": auth(), "/items/abc": [{body:{id:"abc"}}], "/accounts": [{body:{results:[]}}] });
+    await Promise.all([client.getItem("abc"),client.listAccounts("abc")]);
+    expect(calls.filter(call=>call.path==="/auth")).toHaveLength(1);
+  });
+
+  it("clears a failed authentication promise so the next attempt can recover", async () => {
+    const { client, calls } = make({ "/auth": [{throws:true},...auth()], "/items/abc": [{body:{id:"abc"}}] }, {maxRetries:0});
+    await expect(client.getItem("abc")).rejects.toMatchObject({code:"NETWORK_ERROR"});
+    await expect(client.getItem("abc")).resolves.toMatchObject({id:"abc"});
+    expect(calls.filter(call=>call.path==="/auth")).toHaveLength(2);
+  });
+
+  it("preserves a safe timeout code after exhausting retries", async () => {
+    const request = vi.fn(async()=>{throw Object.assign(new Error("secret omitted"),{name:"TimeoutError"});});
+    const client=createPluggyClient({clientId:"synthetic",clientSecret:"synthetic",fetch:request,maxRetries:0});
+    const error=await client.getItem("synthetic").catch(error=>error);
+    expect(error).toMatchObject({code:"NETWORK_TIMEOUT",message:"NETWORK_TIMEOUT"});
+    expect(JSON.stringify(error)).not.toContain("secret omitted");
+  });
+
   it("authenticates on the server with the client credentials and reuses the key between calls", async () => {
     const { client, calls } = make({ "/auth": auth(), "/items/abc": [{ body: { id: "abc", status: "UPDATED" } }, { body: { id: "abc", status: "UPDATED" } }] });
     await client.getItem("abc"); await client.getItem("abc");

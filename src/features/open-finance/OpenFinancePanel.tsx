@@ -12,7 +12,7 @@ import { connectionInstitution, INSTITUTIONS, type Institution } from "./institu
 
 export type TbbCashAccount = { id: string; name: string; balanceCents: number; kind?: "BANK" | "CREDIT" };
 type Connection = Extract<OpenFinanceOverview, { ready: true }>["connections"][number];
-const when = (value: string | null) => value ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "—";
+const when = (value: string | null, timeZone: string) => value ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone }).format(new Date(value)) : "—";
 const dayLabel = (value: string | null) => value ? value.split("-").reverse().join("/") : "—";
 const tone = (status: string) => status === "ACTIVE" ? "ok" : status === "PAUSED" ? "muted" : "warn";
 const billStatusLabel: Record<string, string> = { OPEN: "Aberta", FUTURE_KNOWN: "Futura conhecida", PAID: "Quitada", FORECAST: "Previsão" };
@@ -83,7 +83,7 @@ function CreditBillReviews({ reviews }: { reviews: OpenFinanceOverview["creditRe
   </section>;
 }
 
-function ConnectionCard({ connection, tbb }: { connection: Connection; tbb: TbbCashAccount[] }) {
+function ConnectionCard({ connection, tbb, timeZone }: { connection: Connection; tbb: TbbCashAccount[]; timeZone: string }) {
   const error = openFinanceError(connection.lastErrorCode);
   const paused = connection.status === "PAUSED", resumable = paused || connection.status === "CONSENT_EXPIRED";
   return <article className="panel stack of-connection" id={`of-connection-${connection.id}`}>
@@ -92,10 +92,11 @@ function ConnectionCard({ connection, tbb }: { connection: Connection; tbb: TbbC
       <span className="badge" data-tone={tone(connection.status)}>{connectionStatusLabel[connection.status] ?? connection.status}</span>
     </header>
     <dl className="of-facts">
-      <div><dt>Última sincronização</dt><dd>{when(connection.lastSyncedAt)}</dd></div>
-      <div><dt>Próxima atualização do Meu Pluggy</dt><dd>{when(connection.nextAutoSyncAt)}</dd></div>
-      <div><dt>Dados do banco atualizados em</dt><dd>{when(connection.providerUpdatedAt)}</dd></div>
-      <div><dt>Consentimento até</dt><dd>{connection.consentExpiresAt ? when(connection.consentExpiresAt) : "Sem prazo informado"}</dd></div>
+      <div><dt>Última sincronização concluída</dt><dd>{when(connection.lastSyncedAt, timeZone)}</dd></div>
+      <div><dt>Última tentativa</dt><dd>{when(connection.runs[0]?.startedAt ?? connection.lastErrorAt ?? connection.lastSyncedAt, timeZone)}</dd></div>
+      <div><dt>Próxima atualização do Meu Pluggy</dt><dd>{when(connection.nextAutoSyncAt, timeZone)}</dd></div>
+      <div><dt>Dados do banco atualizados em</dt><dd>{when(connection.providerUpdatedAt, timeZone)}</dd></div>
+      <div><dt>Consentimento até</dt><dd>{connection.consentExpiresAt ? when(connection.consentExpiresAt, timeZone) : "Sem prazo informado"}</dd></div>
     </dl>
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="row">
@@ -113,12 +114,12 @@ function ConnectionCard({ connection, tbb }: { connection: Connection; tbb: TbbC
     </details>
     {connection.runs.length > 0 && <details><summary>Histórico de sincronizações</summary>
       <div className="table-wrap"><table><thead><tr><th>Quando</th><th>Origem</th><th>Resultado</th><th>Lidos</th><th>Criados</th><th>Revisar</th><th>Já conhecidos</th></tr></thead><tbody>
-        {connection.runs.map((run) => <tr key={run.id}><td>{when(run.startedAt)}</td><td>{run.trigger === "CRON" ? "Agendada" : "Manual"}</td><td>{runStatusLabel[run.status] ?? run.status}{run.errorCode ? ` · ${run.errorCode}` : ""}</td><td>{run.transactionsFetched}</td><td>{run.autoCreated}</td><td>{run.needsReview}</td><td>{run.alreadyKnown}</td></tr>)}
+        {connection.runs.map((run) => <tr key={run.id}><td>{when(run.startedAt, timeZone)}</td><td>{run.trigger === "CRON" ? "Agendada" : "Manual"}</td><td>{runStatusLabel[run.status] ?? run.status}{run.errorCode ? ` · ${run.errorCode}` : ""}</td><td>{run.transactionsFetched}</td><td>{run.autoCreated}</td><td>{run.needsReview}</td><td>{run.alreadyKnown}</td></tr>)}
       </tbody></table></div></details>}
   </article>;
 }
 
-export function OpenFinancePanel({ overview, tbbAccounts, migrationReady }: { overview: OpenFinanceOverview; tbbAccounts: TbbCashAccount[]; migrationReady: boolean }) {
+export function OpenFinancePanel({ overview, tbbAccounts, migrationReady, timeZone = "UTC" }: { overview: OpenFinanceOverview; tbbAccounts: TbbCashAccount[]; migrationReady: boolean; timeZone?: string }) {
   return <div className="stack of-page">
     <section className="panel stack">
       <div className="row justify-between"><div><h2>Estado da integração</h2><p className="muted text-sm">O TBB lê os dados autorizados no Meu Pluggy. Nada é gravado no banco, e nenhuma senha bancária passa por aqui.</p></div>{migrationReady && overview.configured && <AddConnection count={overview.connections.length}/>}</div>
@@ -141,7 +142,7 @@ export function OpenFinancePanel({ overview, tbbAccounts, migrationReady }: { ov
     {migrationReady && overview.configured && <InstitutionSetup connections={overview.connections}/>}
     {overview.pendingReview > 0 && <section className="panel row justify-between"><p><strong>{overview.pendingReview} movimento(s)</strong> aguardam sua revisão: possíveis duplicidades, pagamentos de fatura e transferências entre contas suas.</p><Link className="button" href="/finance/imports">Revisar em Importar → Retomar revisão</Link></section>}
     <CreditBillReviews reviews={overview.creditReviews}/>
-    {overview.connections.map((connection) => <ConnectionCard key={connection.id} connection={connection} tbb={tbbAccounts}/>)}
+    {overview.connections.map((connection) => <ConnectionCard key={connection.id} connection={connection} tbb={tbbAccounts} timeZone={timeZone}/>)}
     {migrationReady && overview.configured && overview.connections.length === 0 && <section className="panel"><p className="muted">Nenhum banco conectado ainda. Siga os passos acima e use “Adicionar conexão”.</p></section>}
   </div>;
 }

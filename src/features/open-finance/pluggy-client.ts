@@ -11,6 +11,16 @@ export class PluggyError extends Error {
   constructor(public readonly code: string, public readonly status?: number) { super(code); this.name = "PluggyError"; }
 }
 
+/** Keep transport diagnostics useful without retaining URLs, credentials or raw error messages. */
+export function pluggyTransportError(error: unknown): string {
+  const value = error as { name?: string; code?: string | number; cause?: { code?: string } } | null;
+  const code = value?.cause?.code ?? value?.code;
+  if (value?.name === "TimeoutError" || value?.name === "AbortError" || ["UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "ETIMEDOUT", "ABORT_ERR"].includes(String(code))) return "NETWORK_TIMEOUT";
+  if (["ENOTFOUND", "EAI_AGAIN"].includes(String(code))) return "DNS_ERROR";
+  if (/^(?:ERR_TLS_|ERR_SSL_|CERT_|UNABLE_TO_|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN)/.test(String(code))) return "TLS_ERROR";
+  return "NETWORK_ERROR";
+}
+
 export type PluggyClientOptions = {
   clientId: string;
   clientSecret: string;
@@ -30,15 +40,20 @@ export function createPluggyClient(options: PluggyClientOptions) {
   const doFetch = options.fetch ?? fetch, sleep = options.sleep ?? defaultSleep, now = options.now ?? Date.now;
   const maxRetries = options.maxRetries ?? 4, maxRateLimitWaitMs = options.maxRateLimitWaitMs ?? 65_000, timeoutMs = options.timeoutMs ?? 20_000;
   let key: { value: string; expiresAt: number } | null = null;
+  let pendingKey: Promise<string> | null = null;
 
   async function send(path: string, init: RequestInit, auth: boolean, attempt = 0, refreshed = false): Promise<unknown> {
     const headers: Record<string, string> = { Accept: "application/json", ...(init.body ? { "Content-Type": "application/json" } : {}) };
     if (auth) headers["X-API-KEY"] = await apiKey();
     let response: Response;
     try { response = await doFetch(`${PLUGGY_BASE_URL}${path}`, { ...init, headers, signal: AbortSignal.timeout(timeoutMs), redirect: "error" }); }
-    catch { return retry(path, init, auth, attempt, refreshed, "NETWORK_ERROR"); }
+    catch (error) { return retry(path, init, auth, attempt, refreshed, pluggyTransportError(error)); }
     if (response.ok) {
-      try { return await response.json(); } catch { throw new PluggyError("UNEXPECTED_RESPONSE", response.status); }
+      try { return await response.json(); }
+      catch (error) {
+        if (error instanceof SyntaxError) throw new PluggyError("UNEXPECTED_RESPONSE", response.status);
+        return retry(path, init, auth, attempt, refreshed, pluggyTransportError(error));
+      }
     }
     if ((response.status === 401 || response.status === 403) && auth && !refreshed) { key = null; return send(path, init, auth, attempt, true); }
     if (response.status === 401 || response.status === 403) throw new PluggyError(auth ? "UNAUTHORIZED" : "INVALID_CREDENTIALS", response.status);
@@ -60,11 +75,15 @@ export function createPluggyClient(options: PluggyClientOptions) {
   }
   async function apiKey() {
     if (key && key.expiresAt > now()) return key.value;
-    const body = await send("/auth", { method: "POST", body: JSON.stringify({ clientId: options.clientId, clientSecret: options.clientSecret }) }, false);
-    const parsed = authSchema.safeParse(body);
-    if (!parsed.success) throw new PluggyError("UNEXPECTED_RESPONSE");
-    key = { value: parsed.data.apiKey, expiresAt: now() + API_KEY_TTL_MS };
-    return key.value;
+    if (pendingKey) return pendingKey;
+    pendingKey = (async () => {
+      const body = await send("/auth", { method: "POST", body: JSON.stringify({ clientId: options.clientId, clientSecret: options.clientSecret }) }, false);
+      const parsed = authSchema.safeParse(body);
+      if (!parsed.success) throw new PluggyError("UNEXPECTED_RESPONSE");
+      key = { value: parsed.data.apiKey, expiresAt: now() + API_KEY_TTL_MS };
+      return key.value;
+    })();
+    try { return await pendingKey; } finally { pendingKey = null; }
   }
   async function one<T extends z.ZodTypeAny>(path: string, schema: T): Promise<z.infer<T>> {
     const parsed = schema.safeParse(await send(path, { method: "GET" }, true));
@@ -134,6 +153,6 @@ const shared: { scheduled: PluggyClient | null; interactive: PluggyClient | null
 export function sharedPluggyClient(purpose: "scheduled" | "interactive" = "scheduled"): PluggyClient | null {
   const config = pluggyConfigFromEnv();
   if (!config) return null;
-  shared[purpose] ??= createPluggyClient(purpose === "interactive" ? { ...config, maxRetries: 1, timeoutMs: 12_000, maxRateLimitWaitMs: 8_000 } : config);
+  shared[purpose] ??= createPluggyClient(purpose === "interactive" ? { ...config, maxRetries: 1, timeoutMs: 12_000, maxRateLimitWaitMs: 8_000 } : { ...config, maxRetries: 2, timeoutMs: 15_000 });
   return shared[purpose];
 }

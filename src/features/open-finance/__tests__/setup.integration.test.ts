@@ -16,7 +16,7 @@ import { addConnection } from "../connections";
 import { configureAllAccounts, syncEverything } from "../setup";
 import { latestCreditBills } from "../credit-bills";
 import type { PluggyAccount, PluggyTransaction, PluggyBill } from "../pluggy-schemas";
-import type { PluggyClient } from "../pluggy-client";
+import { PluggyError, type PluggyClient } from "../pluggy-client";
 import { transactionOriginWhere, transactionOriginSql } from "@/features/finance/data-origin";
 import { Prisma } from "@prisma/client";
 
@@ -51,6 +51,16 @@ describe.skipIf(!process.env.FINANCE_PLANNING_TEST_DB_URL)("default full-history
     bills = [{ id: "current", dueDate: DUE, billClosingDate: "2032-10-26", totalAmount: 100, totalAmountCurrencyCode: "BRL" }]; calls = [];
   }, 30000);
   afterAll(async () => { await prisma.$disconnect(); });
+
+  it("records failed discovery without changing the last success or financial data", async () => {
+    const before=await ledger();
+    await prisma.openFinanceConnection.update({where:{id:connectionId},data:{lastSyncedAt:new Date("2032-10-18")}});
+    const failing={...client,getItem:async()=>{throw new PluggyError("NETWORK_TIMEOUT");}} as PluggyClient;
+    await expect(syncEverything({...deps,client:failing},actor,connectionId)).rejects.toMatchObject({code:"NETWORK_TIMEOUT"});
+    expect(await ledger()).toEqual(before);
+    expect(await prisma.openFinanceConnection.findUnique({where:{id:connectionId}})).toMatchObject({status:"ERROR",lastErrorCode:"NETWORK_TIMEOUT",lastSyncedAt:new Date("2032-10-18")});
+    expect(await prisma.openFinanceSyncRun.findFirst({where:{connectionId},orderBy:{startedAt:"desc"}})).toMatchObject({status:"ERROR",errorCode:"NETWORK_TIMEOUT",finishedAt:NOW});
+  });
 
   it("reuses existing accounts, imports the earliest available data, and preserves the confirmed cash checkpoint", async () => {
     const before = await prisma.account.findMany({ where: { workspaceId: actor.workspaceId }, orderBy: { id: "asc" } });

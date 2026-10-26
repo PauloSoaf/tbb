@@ -10,6 +10,9 @@ const errors: Record<string, string> = {
   RATE_LIMITED: "A Pluggy limitou as consultas por alguns instantes. Tente de novo em um minuto.",
   PROVIDER_UNAVAILABLE: "A Pluggy está indisponível agora. A próxima sincronização tenta de novo.",
   NETWORK_ERROR: "Não foi possível falar com a Pluggy. Confira a conexão com a internet.",
+  NETWORK_TIMEOUT: "A conexão com api.pluggy.ai não respondeu a tempo. Os dados salvos foram mantidos. Tente novamente ou teste outra rede; a falha ocorreu antes de concluir a consulta à Pluggy.",
+  DNS_ERROR: "O computador não conseguiu localizar api.pluggy.ai. Confira o DNS ou teste outra rede. Os dados salvos foram mantidos.",
+  TLS_ERROR: "Não foi possível validar a conexão segura com a Pluggy. Confira o relógio do computador, certificados e eventual inspeção HTTPS da rede. Os dados salvos foram mantidos.",
   UNEXPECTED_RESPONSE: "A Pluggy respondeu em um formato inesperado. Nada foi importado.",
   TOO_MANY_PAGES: "A conta tem movimentos demais para uma única consulta. Escolha uma data de início mais recente.",
   RECONNECT_REQUIRED: "O banco pede que você se conecte de novo. Reconecte em meu.pluggy.ai e depois use Retomar.",
@@ -17,6 +20,8 @@ const errors: Record<string, string> = {
   SYNC_FAILED: "A sincronização falhou. Nada foi importado pela metade; tente de novo.",
 };
 export const openFinanceError = (code: string | null | undefined) => code ? errors[code] ?? (code.startsWith("HTTP_") ? "A Pluggy recusou o pedido. Tente de novo mais tarde." : errors.SYNC_FAILED) : null;
+
+export const openFinanceHttpStatus = (code?: string) => code === "NOT_FOUND" ? 404 : code === "RATE_LIMITED" ? 429 : code === "NETWORK_TIMEOUT" ? 504 : code === "BUSY" ? 409 : 503;
 
 export const connectionStatusLabel: Record<string, string> = { ACTIVE: "Ativa", PAUSED: "Pausada", ERROR: "Com erro", CONSENT_EXPIRED: "Consentimento expirado" };
 export const runStatusLabel: Record<string, string> = { RUNNING: "Em andamento", SUCCESS: "Concluída", PARTIAL: "Parcial", ERROR: "Falhou", NEEDS_RECONNECT: "Reconectar", CONSENT_EXPIRED: "Consentimento expirado" };

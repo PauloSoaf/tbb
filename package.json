@@ -19,6 +19,8 @@
     "prisma:studio": "prisma studio",
     "typecheck": "tsc --noEmit",
     "open-finance:probe": "node scripts/open-finance-probe.mjs",
+    "open-finance:diagnose": "node scripts/diagnose-pluggy.mjs",
+    "open-finance:sync": "node scripts/sync-open-finance.mjs",
     "setup:local": "node scripts/setup-local.mjs"
   },
   "dependencies": {

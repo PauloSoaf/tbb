@@ -148,7 +148,7 @@ Hoje a autenticação é a sessão por cookie do app. Para o aplicativo móvel b
 
 O Meu Pluggy atualiza a cada 24 horas, então uma execução a cada 6 a 12 horas basta (a rota ignora conexões sincronizadas há menos de 3 horas).
 
-- **Windows (computador do titular):** Agendador de Tarefas chamando `curl -H "Authorization: Bearer <segredo>" http://localhost:3000/api/open-finance/cron`.
+- **Windows (computador do titular):** Agendador de Tarefas chamando `node scripts/sync-open-finance.mjs` na raiz do projeto. O script carrega o segredo do `.env`, chama somente o servidor local e termina com código 1 se a sincronização falhar ou ficar parcial. O lançador precisa aguardar o processo e propagar esse código; iniciar o Node em segundo plano e encerrar imediatamente produz um falso sucesso no Agendador.
 - **Vercel:** adicionar em `vercel.json` `"crons": [{ "path": "/api/open-finance/cron", "schedule": "0 9 * * *" }]` e definir `CRON_SECRET` (a rota lê `OPEN_FINANCE_CRON_SECRET` ou `CRON_SECRET`). O plano gratuito limita a uma execução por dia. Não foi adicionado ao `vercel.json` porque o banco de produção pode ser outro.
 
 ## Custo recorrente estimado
@@ -187,3 +187,26 @@ O calendário lê os lançamentos efetivamente confirmados. A página dedicada m
 ## Conciliação entre origens
 
 O seletor de origem distingue importações, Open Finance e cadastros manuais. Correspondências exatas compartilham o mesmo lançamento, mantendo ambas as evidências. Totais de fatura nunca são inferidos do limite utilizado do cartão. Regras, filtros e auditoria estão em [Origem dos dados financeiros](DATA_ORIGINS.md).
+
+## Falhas de conexão e diagnóstico
+
+Uma resposta começando com `0:` e `1:` pode ser o protocolo normal de uma Server Action do Next.js. Nesse caso, o campo `error` contém o resultado da operação; esses prefixos não indicam corrupção do endpoint.
+
+Use `npm run open-finance:diagnose` para testar DNS, conexão TLS com validação de certificado e, somente se houver conexão segura, uma chamada sem credenciais à API. O diagnóstico não carrega o `.env`, não consulta contas nem registra corpos de respostas ou endereços IP. Falha de DNS, timeout e erro de certificado são diferenciados. Não desative a validação TLS para contornar uma falha.
+
+A tela distingue **Última sincronização concluída** de **Última tentativa**, no fuso do espaço de trabalho. Uma falha durante a descoberta de produtos registra uma tentativa com erro, preservando a data do último sucesso e os dados financeiros existentes. A ação manual atualiza esse histórico mesmo quando falha. Sincronizar todos os bancos retorna erro se nenhum concluir; resultados mistos são apresentados como parciais.
+
+O cliente compartilha a autenticação em andamento entre chamadas concorrentes e libera essa reserva após uma falha para permitir nova tentativa. Chamadas interativas têm timeout de 12 segundos e uma repetição; o cliente agendado usa 15 segundos e até duas repetições. Falhas comuns de infraestrutura interrompem consultas repetidas aos demais bancos nessa execução agendada, registrando o impedimento para cada conexão.
+
+| Situação | Resposta HTTP |
+|---|---|
+| Cron concluído ou sem conexões vencidas | 200 |
+| Cron com parte das conexões concluída | 207 |
+| Cron sem nenhuma conexão concluída por falha | 503 |
+| Sincronização individual com timeout da Pluggy | 504 |
+
+`npm run open-finance:sync` executa o mesmo cliente local do agendamento. O relatório em `.data/pluggy-last-scheduled-sync.json` contém apenas data, sucesso, status HTTP e código de erro permitido. HTTP 207 ou um resultado com erro não são tratados como sucesso. O computador e o TBB precisam estar em execução. A tarefa local está configurada a cada seis horas; isso não força uma atualização bancária do Meu Pluggy, que tem sua própria periodicidade de 24 horas.
+
+Em 26/10/2026, os testes locais resolveram o DNS da API, mas a negociação TLS expirou tanto no Node quanto no cliente nativo do Windows, enquanto a documentação e a página de status responderam. Essa constatação não permite atribuir a causa ao provedor, à operadora ou à proteção de rede. O tratamento da falha foi corrigido, mas o acesso real à API depende do restabelecimento dessa conexão. A tentativa agendada foi auditada sem alteração de registros financeiros. Nenhuma migração de schema é necessária.
+
+Validação deste ajuste: 910 testes da suíte padrão, 60 testes de integração PostgreSQL em banco separado, typecheck, lint e build de produção passaram. No navegador, 13 verificações com dados sintéticos cobriram a Server Action real, timeout HTTP 504, preservação da última sincronização, atualização do histórico, recuperação após falha, privacidade e larguras de 390/320 px, sem erros de hidratação ou execução.

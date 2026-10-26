@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/workspace";
-import { sharedPluggyClient } from "@/features/open-finance/pluggy-client";
+import { PluggyError, sharedPluggyClient } from "@/features/open-finance/pluggy-client";
 import { syncEverything } from "@/features/open-finance/setup";
 import { revalidatePath } from "next/cache";
-import { openFinanceError } from "@/features/open-finance/copy";
+import { openFinanceError, openFinanceHttpStatus } from "@/features/open-finance/copy";
 
 const body = z.object({ connectionId: z.string().min(1).max(100) });
 export async function POST(request: Request) {
@@ -18,8 +18,11 @@ export async function POST(request: Request) {
   try {
     const summary = await syncEverything({ prisma, client }, context, parsed.data.connectionId);
     revalidatePath("/finance", "layout");
-    return NextResponse.json({ ...summary, message: summary.errorCode ? openFinanceError(summary.errorCode) : null }, { headers: { "Cache-Control": "no-store" } });
+    const status = summary.status === "ERROR" || summary.status === "NEEDS_RECONNECT" || summary.status === "CONSENT_EXPIRED" ? openFinanceHttpStatus(summary.errorCode) : summary.status === "PARTIAL" ? 207 : summary.status === "BUSY" ? 409 : 200;
+    return NextResponse.json({ ...summary, message: summary.errorCode ? openFinanceError(summary.errorCode) : null }, { status, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Falha na sincronização." }, { status: 404 });
+    const code = error instanceof PluggyError ? error.code : "SYNC_FAILED";
+    if (error instanceof PluggyError) revalidatePath("/integrations/open-finance");
+    return NextResponse.json({ error: openFinanceError(code), code }, { status: error instanceof PluggyError ? openFinanceHttpStatus(code) : 500, headers: { "Cache-Control": "no-store" } });
   }
 }

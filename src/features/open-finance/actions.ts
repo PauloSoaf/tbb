@@ -41,7 +41,7 @@ export async function syncOpenFinanceNow(fd: FormData) {
     invalidate();
     const message = syncMessage(summary);
     return "success" in message && summary.unresolved ? { success: `${message.success} ${summary.unresolved} produto(s) precisam de vínculo nos ajustes avançados.` } : message;
-  } catch (error) { return fail(error); }
+  } catch (error) { if (error instanceof PluggyError) revalidatePath("/integrations/open-finance"); return fail(error); }
 }
 
 export async function syncOpenFinanceSelection(fd: FormData) {
@@ -59,12 +59,16 @@ export async function syncAllOpenFinanceConnections() {
     if (ctx.role !== "OWNER") throw new Error("Somente o titular sincroniza integrações bancárias.");
     if (!client) throw new Error("Credenciais da Pluggy não configuradas.");
     const connections = await prisma.openFinanceConnection.findMany({ where: { workspaceId: ctx.workspaceId, status: { in: ["ACTIVE", "ERROR"] } }, select: { id: true } });
-    let created = 0, review = 0, unresolved = 0, failed = 0;
+    let created = 0, review = 0, unresolved = 0, failed = 0, partial = 0;
+    let failureCode: string | undefined;
     for (const connection of connections) {
-      try { const result = await syncEverything({ prisma, client }, ctx, connection.id); created += result.autoCreated; review += result.needsReview; unresolved += result.unresolved; if (!["SUCCESS", "PARTIAL"].includes(result.status)) failed++; }
-      catch { failed++; }
+      try { const result = await syncEverything({ prisma, client }, ctx, connection.id); created += result.autoCreated; review += result.needsReview; unresolved += result.unresolved; if (result.status === "PARTIAL") partial++; else if (result.status !== "SUCCESS") failed++; if (result.errorCode) failureCode = result.errorCode; }
+      catch (error) { failed++; if (error instanceof PluggyError) failureCode = error.code; }
     }
-    invalidate(); return { success: `Histórico sincronizado: ${created} lançamento(s) novo(s), ${review} para revisar.${unresolved ? ` ${unresolved} produto(s) precisam de vínculo nos ajustes avançados.` : ""}${failed ? ` ${failed} banco(s) precisam de nova tentativa.` : ""}` };
+    invalidate();
+    if (!connections.length) return { error: "Não há conexões ativas para sincronizar." };
+    if (failed === connections.length) return { error: `Nenhum banco concluiu a sincronização. ${openFinanceError(failureCode) ?? "Confira o histórico e tente novamente."}` };
+    return { success: `${failed || partial ? "Sincronização parcial" : "Histórico sincronizado"}: ${created} lançamento(s) novo(s), ${review} para revisar.${unresolved ? ` ${unresolved} produto(s) precisam de vínculo nos ajustes avançados.` : ""}${failed + partial ? ` ${failed + partial} banco(s) precisam de nova tentativa.` : ""}` };
   } catch (error) { return fail(error); }
 }
 

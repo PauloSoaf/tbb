@@ -18,6 +18,6 @@ export default async function OpenFinancePage() {
     .map(({ id, name, balanceCents, type }) => ({ id, name, balanceCents, kind: type === "CREDIT_CARD" ? "CREDIT" as const : "BANK" as const }));
   return <FinancePrivacyBoundary canWrite={context.canWrite}><div className="stack">
     <PageHeader eyebrow="INTEGRATIONS · OPEN FINANCE" title="Bancos conectados pelo Meu Pluggy." description="Importe saldos e movimentos das suas contas pelo Open Finance, sem lançar nada duas vezes."/>
-    <OpenFinancePanel overview={overview} tbbAccounts={tbbAccounts} migrationReady={overview.ready}/>
+    <OpenFinancePanel overview={overview} tbbAccounts={tbbAccounts} migrationReady={overview.ready} timeZone={context.workspace.timezone}/>
   </div></FinancePrivacyBoundary>;
 }
