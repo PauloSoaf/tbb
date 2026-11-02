@@ -1,0 +1,1 @@
+export default function Loading(){return <div className="panel stack" role="status" aria-live="polite"><h2>Organizando sua próxima oportunidade…</h2><p className="muted">Carregando candidaturas, agenda e materiais de preparação.</p></div>;}

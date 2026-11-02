@@ -112,6 +112,16 @@ model Workspace {
   interviews                    Interview[]
   offers                        Offer[]
   careerDocuments               CareerDocument[]
+  professionalProfiles          ProfessionalProfile[]
+  resumeProfiles                ResumeProfile[]
+  resumeVersions                ResumeVersion[]
+  interviewStories              InterviewStory[]
+  interviewAnswers              InterviewAnswer[]
+  practiceSessions              PracticeSession[]
+  careerEvents                  CareerEvent[]
+  careerGoals                   CareerGoal[]
+  careerLinks                   CareerLink[]
+  careerViews                   CareerView[]
   id                            String                        @id @default(cuid())
   name                          String
   slug                          String                        @unique
@@ -1752,7 +1762,10 @@ model OpenFinanceSyncRun {
 
 enum ApplicationStatus {
   SAVED
+  WANT_TO_APPLY
   APPLIED
+  IN_REVIEW
+  TECHNICAL_TEST
   RECRUITER_CONTACT
   HR_INTERVIEW
   TECHNICAL_INTERVIEW
@@ -1761,6 +1774,7 @@ enum ApplicationStatus {
   ACCEPTED
   REJECTED
   WITHDRAWN
+  ARCHIVED
 }
 
 enum WorkMode {
@@ -1770,17 +1784,21 @@ enum WorkMode {
 }
 
 model Company {
-  id           String        @id @default(cuid())
-  workspaceId  String
-  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  name         String
-  website      String?
-  industry     String?
-  notes        String?
-  applications Application[]
-  contacts     Contact[]
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id             String        @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name           String
+  website        String?
+  industry       String?
+  careersUrl     String?
+  priority       Int           @default(2)
+  trackingStatus String        @default("WATCHING")
+  isFavorite     Boolean       @default(false)
+  notes          String?
+  applications   Application[]
+  contacts       Contact[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   @@unique([id, workspaceId])
   @@index([workspaceId, name])
@@ -1806,6 +1824,19 @@ model Application {
   statusChangedAt DateTime          @default(now())
   notes           String?
   nextActionDate  String?
+  nextAction      String?
+  foundOn         String?
+  deadline        String?
+  seniority       String?
+  response        String            @default("NONE")
+  lastContactOn   String?
+  tags            String[]          @default([])
+  requirements    String?
+  coverLetter     String?
+  resumeVersionId String?
+  resumeVersion   ResumeVersion?    @relation(fields: [resumeVersionId, workspaceId], references: [id, workspaceId])
+  revision        Int               @default(1)
+  careerEvents    CareerEvent[]
   interviews      Interview[]
   offers          Offer[]
   documents       CareerDocument[]
@@ -1815,6 +1846,8 @@ model Application {
   @@unique([id, workspaceId])
   @@index([workspaceId, status])
   @@index([workspaceId, nextActionDate])
+  @@index([workspaceId, updatedAt, id])
+  @@index([workspaceId, appliedAt])
 }
 
 model Contact {
@@ -1844,6 +1877,12 @@ model Interview {
   durationMinutes Int         @default(60)
   location        String?
   notes           String?
+  status          String      @default("PENDING")
+  meetingUrl      String?
+  preparation     String?
+  preparationDone Boolean     @default(false)
+  revision        Int         @default(1)
+  updatedAt       DateTime    @default(now()) @updatedAt
   createdAt       DateTime    @default(now())
 
   @@index([workspaceId, scheduledAt])
@@ -1875,4 +1914,172 @@ model CareerDocument {
   createdAt     DateTime     @default(now())
 
   @@index([workspaceId])
+}
+
+model ProfessionalProfile {
+  id          String    @id @default(cuid())
+  workspaceId String    @unique
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  content     Json
+  revision    Int       @default(1)
+  updatedAt   DateTime  @updatedAt
+}
+
+model ResumeProfile {
+  id          String          @id @default(cuid())
+  workspaceId String
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title       String
+  stack       String          @default("")
+  language    String          @default("pt")
+  status      String          @default("DRAFT")
+  isFavorite  Boolean         @default(false)
+  tags        String[]        @default([])
+  notes       String?
+  template    String          @default("CLASSIC")
+  spacing     String          @default("NORMAL")
+  content     Json
+  revision    Int             @default(1)
+  versions    ResumeVersion[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, updatedAt])
+}
+
+model ResumeVersion {
+  id           String        @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  resumeId     String
+  resume       ResumeProfile @relation(fields: [resumeId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  number       Int
+  title        String
+  content      Json
+  settings     Json
+  applications Application[]
+  createdAt    DateTime      @default(now())
+
+  @@unique([id, workspaceId])
+  @@unique([resumeId, number])
+  @@index([workspaceId, resumeId])
+}
+
+model InterviewStory {
+  id          String            @id @default(cuid())
+  workspaceId String
+  workspace   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title       String
+  method      String            @default("STAR")
+  content     Json
+  revision    Int               @default(1)
+  answers     InterviewAnswer[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId])
+}
+
+model InterviewAnswer {
+  id          String          @id @default(cuid())
+  workspaceId String
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  question    String
+  category    String
+  content     Json
+  storyId     String?
+  story       InterviewStory? @relation(fields: [storyId, workspaceId], references: [id, workspaceId])
+  confidence  Int             @default(1)
+  revision    Int             @default(1)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, category])
+}
+
+model PracticeSession {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId           String
+  targetMinutes    Int       @default(45)
+  status           String    @default("PAUSED")
+  totalSeconds     Int       @default(0)
+  activeSince      DateTime?
+  activeQuestionId String?
+  answers          Json
+  notes            String    @default("")
+  revision         Int       @default(1)
+  startedAt        DateTime  @default(now())
+  finishedAt       DateTime?
+  updatedAt        DateTime  @updatedAt
+
+  @@index([workspaceId, userId, startedAt])
+}
+
+model CareerEvent {
+  id              String       @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  applicationId   String?
+  application     Application? @relation(fields: [applicationId, workspaceId], references: [id, workspaceId])
+  title           String
+  type            String       @default("REMINDER")
+  status          String       @default("PENDING")
+  scheduledAt     DateTime
+  durationMinutes Int          @default(30)
+  meetingUrl      String?
+  notes           String?
+  revision        Int          @default(1)
+  createdAt       DateTime     @default(now())
+
+  @@index([workspaceId, scheduledAt])
+}
+
+model CareerGoal {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title          String
+  metric         String
+  target         Int
+  manualProgress Int       @default(0)
+  startsOn       String
+  endsOn         String
+  revision       Int       @default(1)
+  createdAt      DateTime  @default(now())
+
+  @@index([workspaceId, endsOn])
+}
+
+model CareerLink {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title       String
+  url         String
+  type        String    @default("JOB_BOARD")
+  stack       String    @default("")
+  notes       String?
+  priority    Int       @default(2)
+  isFavorite  Boolean   @default(false)
+  revision    Int       @default(1)
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, type])
+}
+
+model CareerView {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  title       String
+  settings    Json
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([workspaceId, userId, title])
 }
