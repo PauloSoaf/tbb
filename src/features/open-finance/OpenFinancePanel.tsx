@@ -5,7 +5,8 @@ import { ActionForm } from "@/components/ui/ActionForm";
 import { KeepFormValues } from "@/components/ui/KeepFormValues";
 import { Modal } from "@/components/ui/Modal";
 import { money } from "@/features/finance/money";
-import { addOpenFinanceConnection, mapOpenFinanceAccount, pauseOpenFinanceConnection, removeOpenFinanceConnection, reviewOpenFinanceBill, syncAllOpenFinanceConnections, syncOpenFinanceNow, syncOpenFinanceSelection } from "./actions";
+import { addOpenFinanceConnection, mapOpenFinanceAccount, pauseOpenFinanceConnection, removeOpenFinanceConnection, syncAllOpenFinanceConnections, syncOpenFinanceNow, syncOpenFinanceSelection } from "./actions";
+import { CreditBillReviews } from "./CreditBillReviews";
 import { accountKindLabel, connectionStatusLabel, openFinanceError, runStatusLabel } from "./copy";
 import type { OpenFinanceOverview } from "./queries";
 import { connectionInstitution, INSTITUTIONS, type Institution } from "./institutions";
@@ -15,7 +16,6 @@ type Connection = Extract<OpenFinanceOverview, { ready: true }>["connections"][n
 const when = (value: string | null, timeZone: string) => value ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone }).format(new Date(value)) : "—";
 const dayLabel = (value: string | null) => value ? value.split("-").reverse().join("/") : "—";
 const tone = (status: string) => status === "ACTIVE" ? "ok" : status === "PAUSED" ? "muted" : "warn";
-const billStatusLabel: Record<string, string> = { OPEN: "Aberta", FUTURE_KNOWN: "Futura conhecida", PAID: "Quitada", FORECAST: "Previsão" };
 
 function AddConnection({ count, institution }: { count: number; institution?: Institution }) {
   return <Modal title={institution ? `Conectar ${institution.name} pelo Meu Pluggy` : "Adicionar conexão do Meu Pluggy"} trigger={<><Plus size={15}/>{institution ? `Conectar ${institution.name}` : "Adicionar conexão"}</>} triggerClassName={institution ? "button-secondary" : "button"}>
@@ -63,24 +63,6 @@ function AccountRow({ account, tbb }: { account: Connection["accounts"][number];
     {!isCard && <p className="muted text-xs">Importações anteriores a um saldo já conferido preservam essa referência de saldo.{account.lastTransactionDate ? ` Último movimento lido: ${dayLabel(account.lastTransactionDate)}.` : ""}</p>}
     {drift !== null && <p className="of-drift" data-off={drift !== 0 || undefined}>{drift === 0 ? "O saldo do TBB confere com o do banco." : <>Saldo do TBB {money(mapped!.balanceCents)} · diferença {money(drift)}. <Link href="/finance/accounts">Conferir em Atualizar saldos →</Link></>}</p>}
   </li>;
-}
-
-function CreditBillReviews({ reviews }: { reviews: OpenFinanceOverview["creditReviews"] }) {
-  if (!reviews.length) return null;
-  return <section className="panel stack"><h2>Faturas para conciliar</h2><p className="muted text-sm">Confira a fatura de destino e o total informado pelo banco antes de substituir os valores do TBB.</p>
-    {reviews.map(review => <article key={review.id} className="of-bill-review stack">
-      <div><h3>{review.connectionLabel} · {review.accountName}</h3><strong>Vence {dayLabel(review.dueDate)} · {review.balanceCents !== null ? "Total conciliado " : "Total no banco "}{money(review.totalCents)}</strong>{review.balanceCents !== null && <p className="muted text-sm">Saldo em aberto no banco: {money(review.balanceCents)}. O total acima inclui pagamentos registrados até a data da fonte.</p>}<p className="muted text-xs">{review.closingDate ? `Fecha ${dayLabel(review.closingDate)}` : "Fechamento não informado pelo banco"}</p><p className="muted text-sm">{review.reason}</p><Link className="muted text-sm" href="/finance/statements">Conferir faturas e pagamentos →</Link></div>
-      <KeepFormValues><ActionForm action={reviewOpenFinanceBill} className="of-map" resetOnSuccess={false}>
-        <input type="hidden" name="snapshotId" value={review.id}/>
-        <label>Fatura no TBB<select name="target" defaultValue={review.statements.find(statement => statement.id === review.statementId) ? `${review.statementId}|${review.statements.find(statement => statement.id === review.statementId)!.version}` : ""}>
-          <option value="">Nova fatura, se o período ainda não existir</option>{review.statements.map(statement => <option key={statement.id} value={`${statement.id}|${statement.version}`}>{statement.dueDate ? dayLabel(statement.dueDate) : statement.referenceMonth || "Sem vencimento"}{statement.closingDate ? ` · fecha ${dayLabel(statement.closingDate)}` : ""} · {money(statement.amountCents)} · {billStatusLabel[statement.status] ?? statement.status}</option>)}
-        </select></label>
-        <label>Situação confirmada<select name="status" required defaultValue={review.status ?? ""}><option value="" disabled>Conferir situação</option><option value="OPEN">Aberta</option><option value="FUTURE_KNOWN">Futura conhecida</option><option value="PAID">Quitada, com pagamento confirmado</option></select></label>
-        <label className="of-check"><input type="checkbox" name="confirm" required/><span>Conferi o total e a fatura de destino</span></label>
-        <button className="button-secondary" type="submit">Conciliar fatura</button>
-      </ActionForm></KeepFormValues>
-    </article>)}
-  </section>;
 }
 
 function ConnectionCard({ connection, tbb, timeZone }: { connection: Connection; tbb: TbbCashAccount[]; timeZone: string }) {
@@ -139,6 +121,7 @@ export function OpenFinancePanel({ overview, tbbAccounts, migrationReady, timeZo
         <p className="muted text-xs">Gratuito para uso pessoal, até 5 conexões. Não use para fins comerciais.</p>
       </details>
     </section>
+    {overview.connections.some(connection => connection.status === "ERROR" && ["NETWORK_ERROR", "NETWORK_TIMEOUT", "DNS_ERROR", "TLS_ERROR"].includes(connection.lastErrorCode ?? "")) && <section className="panel of-connectivity-notice" role="status"><h2>Falha de conexão com a Pluggy</h2><p>A última tentativa encontrou um erro de conexão. Confira a última sincronização concluída e o histórico de cada banco abaixo; os registros salvos continuam disponíveis.</p><p className="muted text-sm">Consulte o <a href="https://status.pluggy.ai" target="_blank" rel="noreferrer">status da Pluggy</a> e verifique se o banco atualiza no <a href="https://meu.pluggy.ai" target="_blank" rel="noreferrer">Meu Pluggy</a>. Se ele atualiza por lá, a conexão deste computador com a API ainda precisa ser restabelecida.</p></section>}
     {migrationReady && overview.configured && <InstitutionSetup connections={overview.connections}/>}
     {overview.pendingReview > 0 && <section className="panel row justify-between"><p><strong>{overview.pendingReview} movimento(s)</strong> aguardam sua revisão: possíveis duplicidades, pagamentos de fatura e transferências entre contas suas.</p><Link className="button" href="/finance/imports">Revisar em Importar → Retomar revisão</Link></section>}
     <CreditBillReviews reviews={overview.creditReviews}/>

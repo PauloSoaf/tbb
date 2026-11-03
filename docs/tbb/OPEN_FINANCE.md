@@ -190,7 +190,19 @@ O seletor de origem distingue importações, Open Finance e cadastros manuais. C
 
 ## Falhas de conexão e diagnóstico
 
+### Faturas agrupadas por cartão
+
+As pendências de conciliação aparecem uma vez por cartão do TBB, com nome do produto, final do cartão e quantidade de faturas. Ao expandir o cartão, a lista mostra os vencimentos, a situação informada e o total de cada fatura. Expanda um vencimento para conferir a origem, escolher a fatura de destino e confirmar a conciliação.
+
+O agrupamento usa a identidade da conta do TBB. Cartões diferentes do mesmo banco continuam separados, mesmo que tenham o mesmo nome comercial. Faturas de meses diferentes e evidências conflitantes permanecem disponíveis para conferência individual; o agrupamento não altera lançamentos, faturas, pagamentos ou vínculos. Várias pendências históricas de um mesmo cartão não representam novos cartões cadastrados.
+
+Validação do agrupamento: 931 testes da suíte padrão passaram (110 dependentes de ambiente ficaram ignorados), além de typecheck, lint e build de produção. No navegador, 17 verificações com dados sintéticos em banco separado cobriram cartões com nomes iguais, períodos independentes, preservação da fatura de destino, confirmação obrigatória, aviso de conectividade e larguras de desktop, tablet e celular nos dois temas. Sem erros de hidratação ou execução. Nenhuma migração ou alteração de dados reais foi necessária.
+
+### Resultado da sincronização
+
 Uma resposta começando com `0:` e `1:` pode ser o protocolo normal de uma Server Action do Next.js. Nesse caso, o campo `error` contém o resultado da operação; esses prefixos não indicam corrupção do endpoint.
+
+O POST da Server Action pode retornar HTTP 200 com um objeto `error`. Esse status confirma a resposta da aplicação, não o sucesso da consulta à Pluggy. A tela apresenta um aviso de conectividade quando a conexão termina com erro de rede, DNS, TLS ou timeout, além do histórico de cada banco. Os links para o status oficial e para o Meu Pluggy ajudam a distinguir incidentes do conector bancário de falhas entre o computador e a API. Credenciais e dados bancários não são enviados a esses links pelo TBB.
 
 Use `npm run open-finance:diagnose` para testar DNS, conexão TLS com validação de certificado e, somente se houver conexão segura, uma chamada sem credenciais à API. O diagnóstico não carrega o `.env`, não consulta contas nem registra corpos de respostas ou endereços IP. Falha de DNS, timeout e erro de certificado são diferenciados. Não desative a validação TLS para contornar uma falha.
 

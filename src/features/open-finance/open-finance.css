@@ -45,5 +45,25 @@
 .of-bill-review .of-map{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}
 .of-bill-review .of-check{grid-column:1/-1;white-space:normal}
 .of-bill-review button{justify-self:start}
+.of-review-groups{display:flex;flex-direction:column;gap:10px}
+.of-review-card{border:1px solid var(--border);border-radius:12px;min-width:0}
+.of-review-card-summary{display:flex;align-items:center;gap:12px;padding:14px;cursor:pointer;list-style:none}
+.of-review-card-summary::-webkit-details-marker,.of-bill-summary::-webkit-details-marker{display:none}
+.of-review-card-summary>svg{flex-shrink:0;color:var(--primary)}
+.of-review-card-name{display:flex;flex:1;flex-direction:column;gap:3px;min-width:0;overflow-wrap:anywhere}
+.of-review-card-name small{font-size:.73rem;color:var(--muted-foreground)}
+.of-review-open{font-size:.75rem;color:var(--primary);flex-shrink:0}
+.of-review-open::after{content:" +"}
+details[open]>.of-review-card-summary .of-review-open::after,details[open]>.of-bill-summary .of-review-open::after{content:" −"}
+.of-review-periods{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--border);padding:12px}
+.of-bill-summary{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;list-style:none;cursor:pointer;font-size:.82rem}
+.of-bill-summary>strong{margin-left:auto}
+.of-bill-summary>span:nth-child(2){color:var(--muted-foreground);font-size:.73rem}
+.of-review-content{padding-top:14px}
+.of-review-card-summary:focus-visible,.of-bill-summary:focus-visible{outline:2px solid var(--primary);outline-offset:3px;border-radius:7px}
+.of-connectivity-notice{border-left:3px solid var(--warning)}
+.of-connectivity-notice h2{margin-bottom:7px}
+.of-connectivity-notice a{color:var(--primary);text-decoration:underline}
+@media(max-width:700px){.of-review-card-summary{flex-wrap:wrap;gap:8px}.of-review-card-name{flex-basis:calc(100% - 40px)}.of-review-card-summary>.badge{margin-left:31px}.of-review-card-summary>.of-review-open{margin-left:auto}.of-bill-summary>.of-review-open{flex-basis:100%}}
 @media(max-width:700px){.of-map{grid-template-columns:minmax(0,1fr)}.of-balance{text-align:left}}
 @media(max-width:700px){.of-bill-review .of-map{grid-template-columns:minmax(0,1fr)}}
